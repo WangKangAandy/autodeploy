@@ -19,3 +19,4 @@ cp remote-ssh.env.example remote-ssh.env
 ```
 
 Keep `remote-ssh.env` local only. It stays gitignored even though the template is published.
+Set `MY_SUDO_PASSWD` only when sudo differs from `GPU_SSH_PASSWD`; otherwise the tools fall back to the SSH password.

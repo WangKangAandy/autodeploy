@@ -31,6 +31,7 @@ function getEnv() {
   const host = process.env.GPU_HOST || file.GPU_HOST
   const user = process.env.GPU_USER || file.GPU_USER
   const passwd = process.env.GPU_SSH_PASSWD || file.GPU_SSH_PASSWD
+  const sudoPasswd = process.env.MY_SUDO_PASSWD || file.MY_SUDO_PASSWD || passwd
   const port = process.env.GPU_PORT || file.GPU_PORT || "22"
   if (!host || !user || !passwd) {
     throw new Error(
@@ -41,13 +42,25 @@ function getEnv() {
       `  GPU_SSH_PASSWD=${passwd ? "(set)" : "(unset)"}`
     )
   }
-  return { host, user, passwd, port }
+  return { host, user, passwd, sudoPasswd, port }
 }
 
 function truncate(text: string, maxBytes: number = 51200): string {
   if (Buffer.byteLength(text) <= maxBytes) return text
   const truncated = Buffer.from(text).subarray(0, maxBytes).toString("utf-8")
   return truncated + "\n\n--- OUTPUT TRUNCATED (exceeded 50KB) ---"
+}
+
+function escapeSingleQuotes(value: string): string {
+  return value.replace(/'/g, "'\\''")
+}
+
+function shellQuote(value: string): string {
+  return `'${escapeSingleQuotes(value)}'`
+}
+
+function ensureLocalDependency(name: string): string | null {
+  return Bun.which(name) || null
 }
 
 export default tool({
@@ -82,11 +95,22 @@ export default tool({
     name: tool.schema.string().optional().describe(
       "Container name. If set, reuses a running container with 'docker exec' instead of 'docker run'"
     ),
+    sudo: tool.schema.boolean().optional().describe(
+      "Run the host-side docker command through sudo using MY_SUDO_PASSWD. " +
+      "Defaults to false. If MY_SUDO_PASSWD is unset, GPU_SSH_PASSWD is used as fallback."
+    ),
     timeout: tool.schema.number().optional().describe(
       "Timeout in seconds. Default 300 (5 minutes)"
     ),
   },
   async execute(args, context) {
+    if (!ensureLocalDependency("sshpass")) {
+      return (
+        "ERROR: Local dependency 'sshpass' is not installed. " +
+        "Install it before using remote-docker so SSH password auth can work."
+      )
+    }
+
     const env = getEnv()
     const image = args.image || process.env.TORCH_MUSA_DOCKER_IMAGE
     const workdir = args.workdir || "/workspace"
@@ -103,13 +127,13 @@ export default tool({
     if (args.name) {
       // Reuse existing container via docker exec
       const parts = ["docker exec"]
-      if (args.workdir) parts.push(`-w ${workdir}`)
+      if (args.workdir) parts.push(`-w ${shellQuote(workdir)}`)
       if (args.env_vars) {
         for (const entry of args.env_vars) {
-          parts.push(`-e '${entry}'`)
+          parts.push(`-e ${shellQuote(entry)}`)
         }
       }
-      parts.push(`${args.name} bash -c '${escapedCmd}'`)
+      parts.push(`${shellQuote(args.name)} bash -c '${escapedCmd}'`)
       dockerCmd = parts.join(" ")
     } else {
       // One-shot docker run with mthreads runtime (MT GPU access)
@@ -124,28 +148,32 @@ export default tool({
         "--privileged",
         `--env MTHREADS_VISIBLE_DEVICES=${visibleDevices}`,
         "--env MTHREADS_DRIVER_CAPABILITIES=compute,utility",
-        `-w ${workdir}`,
+        `-w ${shellQuote(workdir)}`,
       ]
       if (args.volumes) {
-        for (const vol of args.volumes) parts.push(`-v ${vol}`)
+        for (const vol of args.volumes) parts.push(`-v ${shellQuote(vol)}`)
       }
       if (args.env_vars) {
         for (const entry of args.env_vars) {
-          parts.push(`-e '${entry}'`)
+          parts.push(`-e ${shellQuote(entry)}`)
         }
       }
-      parts.push(`${image} bash -c '${escapedCmd}'`)
+      parts.push(`${shellQuote(image)} bash -c '${escapedCmd}'`)
       dockerCmd = parts.join(" ")
     }
 
     // Wrap in SSH
+    const remoteCmd = args.sudo
+      ? `export MY_SUDO_PASSWD='${escapeSingleQuotes(env.sudoPasswd)}' && printf '%s\n' "$MY_SUDO_PASSWD" | sudo -SE bash -lc '${escapeSingleQuotes(dockerCmd)}'`
+      : dockerCmd
+
     const sshArgs = [
       "sshpass", "-p", env.passwd,
       "ssh",
       ...SSH_FLAGS,
       "-p", env.port,
       `${env.user}@${env.host}`,
-      dockerCmd,
+      remoteCmd,
     ]
 
     const shortCmd = args.command.length > 50

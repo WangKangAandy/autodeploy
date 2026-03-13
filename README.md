@@ -91,6 +91,7 @@ Expected variables:
 GPU_HOST=<remote-gpu-ip>
 GPU_USER=<ssh-username>
 GPU_SSH_PASSWD=<ssh-password>
+MY_SUDO_PASSWD=<optional-sudo-password-defaults-to-GPU_SSH_PASSWD>
 GPU_PORT=22
 GPU_WORK_DIR=~
 TORCH_MUSA_DOCKER_IMAGE=<optional-default-image>

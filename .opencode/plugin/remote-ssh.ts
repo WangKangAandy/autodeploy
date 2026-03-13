@@ -5,8 +5,31 @@ import * as path from "path"
 
 const REMOTE_TOOLS = ["remote-exec", "remote-sync", "remote-docker"]
 
+function loadEnvFile(worktree: string): Record<string, string> {
+  const envFile = path.join(worktree, ".opencode", "remote-ssh.env")
+  const vars: Record<string, string> = {}
+
+  try {
+    if (!fs.existsSync(envFile)) return vars
+
+    for (const line of fs.readFileSync(envFile, "utf-8").split("\n")) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith("#")) continue
+
+      const eq = trimmed.indexOf("=")
+      if (eq > 0) vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
+    }
+  } catch {
+    // Ignore env file parsing failures.
+  }
+
+  return vars
+}
+
 const RemoteSSHPlugin: Plugin = async (input) => {
   const logFile = path.join(input.worktree, ".opencode", "remote-exec.log")
+  const fileEnv = loadEnvFile(input.worktree)
+  const mergedEnv = { ...fileEnv, ...process.env }
 
   // Ensure log directory exists
   const logDir = path.dirname(logFile)
@@ -19,11 +42,17 @@ const RemoteSSHPlugin: Plugin = async (input) => {
       const envVars: Record<string, string> = {}
       const keys = [
         "GPU_HOST", "GPU_USER", "GPU_SSH_PASSWD", "GPU_PORT", "GPU_WORK_DIR",
-        "TORCH_MUSA_DOCKER_IMAGE",
+        "TORCH_MUSA_DOCKER_IMAGE", "MY_SUDO_PASSWD",
       ]
+
       for (const key of keys) {
-        if (process.env[key]) envVars[key] = process.env[key]!
+        if (mergedEnv[key]) envVars[key] = mergedEnv[key]!
       }
+
+      if (!envVars.MY_SUDO_PASSWD && envVars.GPU_SSH_PASSWD) {
+        envVars.MY_SUDO_PASSWD = envVars.GPU_SSH_PASSWD
+      }
+
       Object.assign(output.env, envVars)
     },
 
@@ -52,18 +81,18 @@ const RemoteSSHPlugin: Plugin = async (input) => {
       const stateLines: string[] = []
 
       // Preserve connection info
-      const host = process.env.GPU_HOST
-      const user = process.env.GPU_USER
+      const host = mergedEnv.GPU_HOST
+      const user = mergedEnv.GPU_USER
       if (host && user) {
         stateLines.push(
           `## Remote MT-GPU Machine Connection`,
-          `Connected to Remote MT-GPU Machine: ${user}@${host}:${process.env.GPU_PORT || "22"}`,
-          `GPU_WORK_DIR: ${process.env.GPU_WORK_DIR || "~ (default)"}`,
+          `Connected to Remote MT-GPU Machine: ${user}@${host}:${mergedEnv.GPU_PORT || "22"}`,
+          `GPU_WORK_DIR: ${mergedEnv.GPU_WORK_DIR || "~ (default)"}`,
         )
       }
 
       // Preserve Docker image info
-      const dockerImage = process.env.TORCH_MUSA_DOCKER_IMAGE
+      const dockerImage = mergedEnv.TORCH_MUSA_DOCKER_IMAGE
       if (dockerImage) {
         stateLines.push(`Docker image: ${dockerImage}`)
       }

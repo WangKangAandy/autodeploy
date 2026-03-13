@@ -31,6 +31,7 @@ function getEnv() {
   const host = process.env.GPU_HOST || file.GPU_HOST
   const user = process.env.GPU_USER || file.GPU_USER
   const passwd = process.env.GPU_SSH_PASSWD || file.GPU_SSH_PASSWD
+  const sudoPasswd = process.env.MY_SUDO_PASSWD || file.MY_SUDO_PASSWD || passwd
   const port = process.env.GPU_PORT || file.GPU_PORT || "22"
   const workdir = process.env.GPU_WORK_DIR || file.GPU_WORK_DIR || "~"
   if (!host || !user || !passwd) {
@@ -42,13 +43,43 @@ function getEnv() {
       `  GPU_SSH_PASSWD=${passwd ? "(set)" : "(unset)"}`
     )
   }
-  return { host, user, passwd, port, workdir }
+  return { host, user, passwd, sudoPasswd, port, workdir }
 }
 
 function truncate(text: string, maxBytes: number = 51200): string {
   if (Buffer.byteLength(text) <= maxBytes) return text
   const truncated = Buffer.from(text).subarray(0, maxBytes).toString("utf-8")
   return truncated + "\n\n--- OUTPUT TRUNCATED (exceeded 50KB) ---"
+}
+
+function escapeSingleQuotes(value: string): string {
+  return value.replace(/'/g, "'\\''")
+}
+
+function escapeDoubleQuotes(value: string): string {
+  return value.replace(/[\\"$`]/g, "\\$&")
+}
+
+function buildWorkdirPrefix(workdir: string): string {
+  if (workdir === "~") return ""
+  if (workdir.startsWith("~/")) {
+    return `cd "$HOME/${escapeDoubleQuotes(workdir.slice(2))}" && `
+  }
+  const otherUserHome = workdir.match(/^(~[^/]+)(?:\/(.*))?$/)
+  if (otherUserHome) {
+    const [, homePrefix, rest = ""] = otherUserHome
+    if (!rest) return `cd ${homePrefix} && `
+    return `cd ${homePrefix}/${shellQuote(rest)} && `
+  }
+  return `cd '${escapeSingleQuotes(workdir)}' && `
+}
+
+function shellQuote(value: string): string {
+  return `'${escapeSingleQuotes(value)}'`
+}
+
+function ensureLocalDependency(name: string): string | null {
+  return Bun.which(name) || null
 }
 
 export default tool({
@@ -64,19 +95,31 @@ export default tool({
     workdir: tool.schema.string().optional().describe(
       "Remote working directory. Defaults to GPU_WORK_DIR env or home directory"
     ),
+    sudo: tool.schema.boolean().optional().describe(
+      "Run the command through sudo on the remote host using MY_SUDO_PASSWD. " +
+      "Defaults to false. If MY_SUDO_PASSWD is unset, GPU_SSH_PASSWD is used as fallback."
+    ),
     timeout: tool.schema.number().optional().describe(
       "Timeout in seconds. Default 120"
     ),
   },
   async execute(args, context) {
+    if (!ensureLocalDependency("sshpass")) {
+      return (
+        "ERROR: Local dependency 'sshpass' is not installed. " +
+        "Install it before using remote-exec so SSH password auth can work."
+      )
+    }
+
     const env = getEnv()
     const workdir = args.workdir || env.workdir
     const timeoutSec = args.timeout || 120
 
-    // Build the remote command with cd
-    const remoteCmd = workdir !== "~"
-      ? `cd ${workdir} && ${args.command}`
-      : args.command
+    const remoteBody = `${buildWorkdirPrefix(workdir)}${args.command}`
+
+    const remoteCmd = args.sudo
+      ? `export MY_SUDO_PASSWD='${escapeSingleQuotes(env.sudoPasswd)}' && printf '%s\n' "$MY_SUDO_PASSWD" | sudo -SE bash -lc '${escapeSingleQuotes(remoteBody)}'`
+      : remoteBody
 
     const sshArgs = [
       "sshpass", "-p", env.passwd,
