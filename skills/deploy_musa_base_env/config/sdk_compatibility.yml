@@ -1,0 +1,8 @@
+- sdk_version: 4.3.1
+  driver_version: 3.3.1-server
+  gpu_type: S4000
+  gpu_arch: QY2
+  os: Ubuntu
+  cpu: Intel
+  supported_images:
+    - registry.mthreads.com/public/musa-train:rc4.3.1-kuae2.1-20251014-juleng

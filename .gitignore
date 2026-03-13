@@ -1,0 +1,5 @@
+.musa_deployment_state.json
+.musa_sdk_install_state.json
+musa_packages/
+.opencode/node_modules/
+.opencode/remote-ssh.env

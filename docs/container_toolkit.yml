@@ -1,0 +1,28 @@
+- version: 2.0.0
+  name: container_toolkit
+  os: Ubuntu
+  cpu: Intel
+  url: "https://mt-website-prod.tos-cn-beijing.volces.com/privacy/developer/resource/download/2025/07/11/i46ffftho5g.zip"
+  md5: 3ce9323a4412f14beaf01a5fa57e7604
+
+- version: 2.0.0
+  name: container_toolkit
+  os: Kylin
+  cpu: Hygon
+  url: "https://oss.mthreads.com/release-ci/cloud/runtime/ubuntu20.04/2.x/mt-container-toolkit-2.0.0-1.x86_64.rpm"
+  md5: 8a0d0a070a873046e1f195f692e408e8
+
+- version: 1.9.0
+  name: container_toolkit
+  os: Ubuntu
+  cpu: Intel
+  url: "https://oss.mthreads.com/product-release/Cloud/mt-cloudnative-toolkits-v1.9.0/external/mt-container-toolkit-1.9.0.zip"
+  md5: e6a1ccd611bee2abff7724c5430ba115
+
+- version: 1.9.0
+  name: container_toolkit
+  os: Ubuntu
+  cpu: Intel
+  url: "https://mt-website-prod.tos-cn-beijing.volces.com/privacy/developer/resource/download/2024/02/24/4fiuqqhfb1j.zip"
+  md5: 1eee0b7ca58208a4b50ae192a66ae064
+
