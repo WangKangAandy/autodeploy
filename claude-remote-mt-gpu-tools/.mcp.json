@@ -1,0 +1,13 @@
+{
+  "name": "remote-mt-gpu-tools",
+  "description": "Claude tools for Remote MT-GPU Machine execution via SSH",
+  "version": "1.0.0",
+  "mcpServers": {
+    "remote-tools": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["dist/server.js"],
+      "cwd": "{{cwd}}"
+    }
+  }
+}
