@@ -75,12 +75,18 @@ let agentTools: {
 
 async function loadAgentTools() {
   if (!agentTools) {
-    const module = await import("../../agent-tools/dist/core/executors.js")
-    agentTools = {
-      execRemote: module.execRemote,
-      execDocker: module.execDocker,
-      syncFiles: module.syncFiles,
-      formatOutput: module.formatOutput,
+    try {
+      const module = await import("../../agent-tools/dist/core/executors.js")
+      agentTools = {
+        execRemote: module.execRemote,
+        execDocker: module.execDocker,
+        syncFiles: module.syncFiles,
+        formatOutput: module.formatOutput,
+      }
+      logger.info("Agent tools loaded successfully")
+    } catch (error) {
+      logger.error(`Failed to load agent tools: ${error}`)
+      throw new Error("Agent tools not available. Make sure agent-tools is built.")
     }
   }
   return agentTools
@@ -91,8 +97,9 @@ async function loadAgentTools() {
  */
 export class ToolClient {
   private config: SSHConfig & { sudoPasswd: string }
+  private credentialsSource: string
 
-  constructor(config: ToolClientConfig) {
+  constructor(config: ToolClientConfig, source: string = "config") {
     this.config = {
       host: config.host,
       user: config.user,
@@ -100,7 +107,22 @@ export class ToolClient {
       port: config.port || "22",
       sudoPasswd: config.sudoPasswd || config.password,
     }
-    logger.info(`ToolClient initialized for ${config.user}@${config.host}:${config.port || 22}`)
+    this.credentialsSource = source
+    logger.info(`ToolClient initialized for ${config.user}@${config.host}:${config.port || 22} (source: ${source})`)
+  }
+
+  /**
+   * Get the credentials source
+   */
+  getCredentialsSource(): string {
+    return this.credentialsSource
+  }
+
+  /**
+   * Get masked host info for logging
+   */
+  getHostInfo(): string {
+    return `${this.config.user}@${this.config.host}:${this.config.port}`
   }
 
   /**
@@ -119,7 +141,21 @@ export class ToolClient {
       )
     }
 
-    return new ToolClient({ host, user, password, port, sudoPasswd })
+    return new ToolClient({ host, user, password, port, sudoPasswd }, "env")
+  }
+
+  /**
+   * Create a ToolClient from dynamic credentials (parsed from user message)
+   */
+  static fromCredentials(host: string, user: string, password: string, port?: string): ToolClient {
+    return new ToolClient({ host, user, password, port }, "dynamic")
+  }
+
+  /**
+   * Check if the client has valid configuration
+   */
+  isValid(): boolean {
+    return !!(this.config.host && this.config.user && this.config.password)
   }
 
   /**
@@ -133,17 +169,26 @@ export class ToolClient {
       timeout?: number
     }
   ): Promise<ExecResult> {
-    logger.info(`Executing remote command: ${command.substring(0, 50)}...`)
+    logger.info(`Executing remote command on ${this.config.host}: ${command.substring(0, 50)}...`)
 
-    const tools = await loadAgentTools()
-    const result = await tools.execRemote(this.config, command, {
-      workdir: options?.workdir,
-      sudo: options?.sudo,
-      timeout: options?.timeout || 120,
-    })
+    try {
+      const tools = await loadAgentTools()
+      const result = await tools.execRemote(this.config, command, {
+        workdir: options?.workdir,
+        sudo: options?.sudo,
+        timeout: options?.timeout || 120,
+      })
 
-    logger.info(`Command completed with exit code: ${result.exitCode}`)
-    return result
+      logger.info(`Command completed with exit code: ${result.exitCode}`)
+      return result
+    } catch (error: any) {
+      logger.error(`Command execution failed: ${error.message}`)
+      return {
+        stdout: "",
+        stderr: error.message,
+        exitCode: -1,
+      }
+    }
   }
 
   /**
@@ -161,7 +206,7 @@ export class ToolClient {
       timeout?: number
     }
   ): Promise<ExecResult> {
-    logger.info(`Executing Docker command: ${command.substring(0, 50)}...`)
+    logger.info(`Executing Docker command on ${this.config.host}: ${command.substring(0, 50)}...`)
 
     const dockerArgs: DockerArgs = {
       command,
@@ -174,11 +219,20 @@ export class ToolClient {
       timeout: options?.timeout || 300,
     }
 
-    const tools = await loadAgentTools()
-    const result = await tools.execDocker(this.config, dockerArgs)
+    try {
+      const tools = await loadAgentTools()
+      const result = await tools.execDocker(this.config, dockerArgs)
 
-    logger.info(`Docker command completed with exit code: ${result.exitCode}`)
-    return result
+      logger.info(`Docker command completed with exit code: ${result.exitCode}`)
+      return result
+    } catch (error: any) {
+      logger.error(`Docker execution failed: ${error.message}`)
+      return {
+        stdout: "",
+        stderr: error.message,
+        exitCode: -1,
+      }
+    }
   }
 
   /**
@@ -219,7 +273,7 @@ export class ToolClient {
     const result = await this.execCommand("mthreads-gmi")
 
     if (result.exitCode !== 0) {
-      return `Failed to get GPU status: ${result.stderr}`
+      return `Failed to get GPU status from ${this.config.host}: ${result.stderr || "Connection failed"}`
     }
 
     return result.stdout
@@ -228,13 +282,57 @@ export class ToolClient {
   /**
    * Check if the remote host is reachable
    */
-  async checkConnection(): Promise<boolean> {
+  async checkConnection(): Promise<{ success: boolean; message: string }> {
     try {
       const result = await this.execCommand("echo 'connection ok'", { timeout: 10 })
-      return result.exitCode === 0
-    } catch {
-      return false
+      if (result.exitCode === 0) {
+        return { success: true, message: `Successfully connected to ${this.config.host}` }
+      }
+      return { success: false, message: `Connection failed: ${result.stderr}` }
+    } catch (error: any) {
+      return { success: false, message: `Connection error: ${error.message}` }
     }
+  }
+
+  /**
+   * Get MUSA environment status
+   */
+  async getMusaStatus(): Promise<string> {
+    const results: string[] = []
+
+    // Check GPU
+    const gpuResult = await this.execCommand("mthreads-gmi 2>/dev/null | head -20")
+    if (gpuResult.exitCode === 0 && gpuResult.stdout.trim()) {
+      results.push("=== GPU 状态 ===")
+      results.push(gpuResult.stdout.trim())
+    } else {
+      results.push("=== GPU 状态 ===")
+      results.push("无法获取 GPU 信息（可能驱动未安装或 mthreads-gmi 不可用）")
+    }
+
+    // Check Docker
+    const dockerResult = await this.execCommand("docker --version 2>/dev/null")
+    if (dockerResult.exitCode === 0) {
+      results.push("\n=== Docker ===")
+      results.push(dockerResult.stdout.trim())
+
+      // Check running containers
+      const containersResult = await this.execCommand("docker ps --format 'table {{.Names}}\\t{{.Image}}\\t{{.Status}}' 2>/dev/null")
+      if (containersResult.exitCode === 0 && containersResult.stdout.trim()) {
+        results.push("\n运行中的容器:")
+        results.push(containersResult.stdout.trim())
+      }
+    } else {
+      results.push("\n=== Docker ===")
+      results.push("Docker 未安装或不可用")
+    }
+
+    // Check MUSA driver
+    const driverResult = await this.execCommand("dpkg -s musa 2>/dev/null | grep -E '^(Package|Version|Status)' || echo 'MUSA 驱动未安装'")
+    results.push("\n=== MUSA 驱动 ===")
+    results.push(driverResult.stdout.trim())
+
+    return results.join("\n")
   }
 
   /**

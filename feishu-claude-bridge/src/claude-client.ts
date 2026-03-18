@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { logger } from "./utils/logger.js"
-import { ToolClient } from "./tool-client.js"
+import { ToolClient, type ToolClientConfig } from "./tool-client.js"
 import { generateSystemPrompt, getContextAwarePrompt } from "./system-prompt.js"
+import { parseCredentials } from "./credential-parser.js"
 
 export interface ClaudeClientConfig {
   apiKey: string
@@ -11,13 +12,13 @@ export interface ClaudeClientConfig {
   toolClient?: ToolClient
 }
 
-// Tool definitions for Claude API
+// Tool definitions for Claude API with dynamic credentials support
 const TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: "remote_exec",
     description:
-      "Execute a shell command on the Remote MT-GPU Machine via SSH. " +
-      "Use this for GPU queries, driver checks, docker commands, system packages, etc. " +
+      "Execute a shell command on a remote machine via SSH. " +
+      "Use the credentials provided by the user in their message. " +
       "For dangerous operations (rm, uninstall, system config changes), ask user confirmation first.",
     input_schema: {
       type: "object",
@@ -26,9 +27,21 @@ const TOOLS: Anthropic.Messages.Tool[] = [
           type: "string",
           description: "The shell command to execute on the remote machine",
         },
+        host: {
+          type: "string",
+          description: "Remote host IP address (use from user message if provided)",
+        },
+        user: {
+          type: "string",
+          description: "SSH username (use from user message if provided)",
+        },
+        password: {
+          type: "string",
+          description: "SSH password (use from user message if provided)",
+        },
         sudo: {
           type: "boolean",
-          description: "Run the command through sudo. Defaults to false. Use only when necessary.",
+          description: "Run the command through sudo. Defaults to false.",
         },
       },
       required: ["command"],
@@ -37,8 +50,8 @@ const TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: "remote_docker",
     description:
-      "Run a command inside a Docker container on the Remote MT-GPU Machine. " +
-      "Use this for builds, tests, GPU workloads in the MUSA SDK container. " +
+      "Run a command inside a Docker container on a remote machine. " +
+      "Use this for builds, tests, GPU workloads. " +
       "Automatically uses --runtime=mthreads for MT GPU access.",
     input_schema: {
       type: "object",
@@ -49,11 +62,23 @@ const TOOLS: Anthropic.Messages.Tool[] = [
         },
         image: {
           type: "string",
-          description: "Docker image to use. Defaults to TORCH_MUSA_DOCKER_IMAGE env var.",
+          description: "Docker image to use.",
         },
         name: {
           type: "string",
-          description: "Container name. If set, uses 'docker exec' on existing container; otherwise 'docker run --rm'",
+          description: "Container name for docker exec mode.",
+        },
+        host: {
+          type: "string",
+          description: "Remote host IP address",
+        },
+        user: {
+          type: "string",
+          description: "SSH username",
+        },
+        password: {
+          type: "string",
+          description: "SSH password",
         },
       },
       required: ["command"],
@@ -62,11 +87,48 @@ const TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: "get_gpu_status",
     description:
-      "Get the current GPU status from the Remote MT-GPU Machine using mthreads-gmi. " +
-      "Use this for quick GPU health checks, driver version verification, and GPU utilization info.",
+      "Get the current GPU status from a remote machine using mthreads-gmi. " +
+      "Use the credentials provided by the user in their message.",
     input_schema: {
       type: "object",
-      properties: {},
+      properties: {
+        host: {
+          type: "string",
+          description: "Remote host IP address (use from user message if provided)",
+        },
+        user: {
+          type: "string",
+          description: "SSH username (use from user message if provided)",
+        },
+        password: {
+          type: "string",
+          description: "SSH password (use from user message if provided)",
+        },
+      },
+    },
+  },
+  {
+    name: "check_musa_status",
+    description:
+      "Check the complete MUSA environment status on a remote machine. " +
+      "Includes GPU status, Docker, driver version, and running containers. " +
+      "Use the credentials provided by the user in their message.",
+    input_schema: {
+      type: "object",
+      properties: {
+        host: {
+          type: "string",
+          description: "Remote host IP address",
+        },
+        user: {
+          type: "string",
+          description: "SSH username",
+        },
+        password: {
+          type: "string",
+          description: "SSH password",
+        },
+      },
     },
   },
 ]
@@ -79,8 +141,10 @@ export class ClaudeClient {
   private model: string
   private maxTokens: number
   private systemPrompt: string
-  private toolClient: ToolClient | undefined
+  private defaultToolClient: ToolClient | undefined
   private conversationHistory: Map<string, Anthropic.Messages.MessageParam[]> = new Map()
+  // Store dynamic credentials per user session
+  private userCredentials: Map<string, ToolClientConfig> = new Map()
 
   constructor(config: ClaudeClientConfig) {
     this.client = new Anthropic({
@@ -92,9 +156,9 @@ export class ClaudeClient {
     // Use provided prompt or generate optimized one
     this.systemPrompt = config.systemPrompt || generateSystemPrompt()
 
-    this.toolClient = config.toolClient
+    this.defaultToolClient = config.toolClient
 
-    logger.info(`Claude client initialized with model: ${this.model}, tools: ${this.toolClient ? "enabled" : "disabled"}`)
+    logger.info(`Claude client initialized with model: ${this.model}, tools: enabled`)
   }
 
   /**
@@ -117,13 +181,21 @@ export class ClaudeClient {
       if (options?.resetConversation) {
         history = []
         this.conversationHistory.set(userId, history)
+        this.userCredentials.delete(userId)
+      }
+
+      // Try to parse credentials from message
+      const parsedCreds = parseCredentials(message)
+      if (parsedCreds) {
+        logger.info(`Detected credentials in message for user ${userId}: ${parsedCreds.user}@${parsedCreds.host}`)
+        this.userCredentials.set(userId, parsedCreds)
       }
 
       // Add user message to history
       history.push({ role: "user", content: message })
 
       // Determine if tools should be used
-      const enableTools = options?.enableTools !== false && this.toolClient !== undefined
+      const enableTools = options?.enableTools !== false
 
       // Use custom system prompt, context-aware prompt, or default
       const systemPrompt = options?.systemPrompt || getContextAwarePrompt(message) || this.systemPrompt
@@ -150,7 +222,7 @@ export class ClaudeClient {
       }
 
       // Process tool use blocks
-      if (toolUseBlocks.length > 0 && this.toolClient) {
+      if (toolUseBlocks.length > 0) {
         // Add assistant message with tool use to history
         history.push({ role: "assistant", content: response.content })
 
@@ -158,7 +230,7 @@ export class ClaudeClient {
         const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
 
         for (const toolUse of toolUseBlocks) {
-          const result = await this.executeTool(toolUse)
+          const result = await this.executeTool(toolUse, userId)
           toolResults.push({
             type: "tool_result",
             tool_use_id: toolUse.id,
@@ -205,37 +277,82 @@ export class ClaudeClient {
   }
 
   /**
-   * Execute a tool call
+   * Get or create a ToolClient for a user
    */
-  private async executeTool(toolUse: Anthropic.ToolUseBlock): Promise<string> {
-    if (!this.toolClient) {
-      return "Error: Tool client not configured"
+  private getToolClient(userId: string, toolArgs?: { host?: string; user?: string; password?: string }): ToolClient {
+    // Priority: tool args > stored user credentials > env config
+
+    if (toolArgs?.host && toolArgs?.user && toolArgs?.password) {
+      logger.info(`Using credentials from tool args: ${toolArgs.user}@${toolArgs.host}`)
+      return ToolClient.fromCredentials(toolArgs.host, toolArgs.user, toolArgs.password)
     }
 
+    const storedCreds = this.userCredentials.get(userId)
+    if (storedCreds) {
+      logger.info(`Using stored credentials for user ${userId}: ${storedCreds.user}@${storedCreds.host}`)
+      return ToolClient.fromCredentials(storedCreds.host, storedCreds.user, storedCreds.password, storedCreds.port)
+    }
+
+    if (this.defaultToolClient) {
+      logger.info(`Using default ToolClient from config`)
+      return this.defaultToolClient
+    }
+
+    // Try to create from env
+    try {
+      return ToolClient.fromEnv()
+    } catch {
+      throw new Error("No SSH credentials available. Please provide host, user, and password in your message.")
+    }
+  }
+
+  /**
+   * Execute a tool call
+   */
+  private async executeTool(toolUse: Anthropic.ToolUseBlock, userId: string): Promise<string> {
     logger.info(`Executing tool: ${toolUse.name}`)
 
     try {
+      const args = toolUse.input as Record<string, any>
+
+      // Get appropriate ToolClient
+      let client: ToolClient
+      try {
+        client = this.getToolClient(userId, {
+          host: args.host,
+          user: args.user,
+          password: args.password,
+        })
+      } catch (error: any) {
+        return `Error: ${error.message}`
+      }
+
+      // Log the connection being used
+      logger.info(`Tool ${toolUse.name} using connection: ${client.getHostInfo()} (source: ${client.getCredentialsSource()})`)
+
       switch (toolUse.name) {
         case "remote_exec": {
-          const args = toolUse.input as { command: string; sudo?: boolean }
-          const result = await this.toolClient.execCommand(args.command, { sudo: args.sudo })
-          return await this.toolClient.formatResult(result)
+          const result = await client.execCommand(args.command, { sudo: args.sudo })
+          return await client.formatResult(result)
         }
         case "remote_docker": {
-          const args = toolUse.input as { command: string; image?: string; name?: string }
-          const result = await this.toolClient.execDocker(args.command, {
+          const result = await client.execDocker(args.command, {
             image: args.image,
             name: args.name,
           })
-          return await this.toolClient.formatResult(result)
+          return await client.formatResult(result)
         }
         case "get_gpu_status": {
-          return await this.toolClient.getGpuStatus()
+          return await client.getGpuStatus()
+        }
+        case "check_musa_status": {
+          return await client.getMusaStatus()
         }
         default:
           return `Error: Unknown tool: ${toolUse.name}`
       }
     } catch (error: any) {
+      logger.error(`Tool execution error: ${error.message}`)
       return `Error executing ${toolUse.name}: ${error.message}`
     }
   }
@@ -255,6 +372,7 @@ export class ClaudeClient {
    */
   clearConversation(userId: string): void {
     this.conversationHistory.delete(userId)
+    this.userCredentials.delete(userId)
     logger.info(`Conversation cleared for user ${userId}`)
   }
 
@@ -263,6 +381,7 @@ export class ClaudeClient {
    */
   clearAllConversations(): void {
     this.conversationHistory.clear()
+    this.userCredentials.clear()
     logger.info("All conversations cleared")
   }
 
