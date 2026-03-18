@@ -6,39 +6,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an automation workspace for MUSA SDK environment setup, remote MT-GPU execution, and deployment documentation. The repository packages:
 - Documented host deployment flows for MUSA-based environments
-- OpenCode tooling for SSH-based remote host and remote container execution
+- Unified agent tools for SSH-based remote host and container execution
+- Feishu bot integration for AI-powered operations
 - Reusable skills and compatibility metadata for repeatable setup work
 
 ## Repository Structure
 
 | Path | Purpose |
 |------|---------|
+| `agent-tools/src/core/` | Core executors: execRemote, execDocker, syncFiles |
+| `agent-tools/src/tools/` | MCP tool definitions for Claude Code |
+| `agent-tools/src/server.ts` | MCP Server entry point |
+| `feishu-claude-bridge/` | Feishu bot with Claude API and tool integration |
 | `skills/deploy_musa_base_env/SKILL.md` | Primary automated workflow for base environment deployment |
 | `skills/update_musa_driver/SKILL.md` | Driver-only upgrade, downgrade, or reinstall workflow |
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK, driver, GPU, and image compatibility mapping |
-| `skills/deploy_musa_base_env/config/container_toolkit.yml` | Container toolkit version metadata |
 | `references/remote-execution-policy.md` | Source of truth for local vs remote command routing |
 | `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
-| `.opencode/plugin/remote-ssh.ts` | Plugin that injects remote env vars and logs remote tool usage |
-| `.opencode/tools/remote-exec.ts` | Remote host command runner |
-| `.opencode/tools/remote-docker.ts` | Remote container command runner |
 
 ## Local Build Commands
 
-This repo has no root app or conventional test suite. Install dependencies for the OpenCode tools:
+### Agent Tools
 
 ```bash
-cd .opencode && bun install
+cd agent-tools && npm install && npm run build
 ```
 
-### TypeScript Validation
-
-There is no `tsconfig.json` or `build` script. For individual tool smoke checks:
+### Feishu Bridge
 
 ```bash
-cd .opencode && bun --eval "await import('./tools/remote-exec.ts')"
-cd .opencode && bun --eval "await import('./tools/remote-docker.ts')"
-cd .opencode && bun --eval "await import('./plugin/remote-ssh.ts')"
+cd feishu-claude-bridge && npm install && npm run build
 ```
 
 ## Validation Commands
@@ -65,7 +62,7 @@ docker exec torch_musa_test python -c "import torch; print(torch.musa.is_availab
 ## Remote Execution Architecture
 
 The repo operates in a split-machine model:
-- **Machine A (local)** — runs OpenCode, holds codebase, performs code analysis and editing
+- **Machine A (local)** — runs Claude Code/OpenCode, holds codebase, performs code analysis and editing
 - **Remote MT-GPU Machine** — runs Docker containers with MUSA SDK, accessed via SSH
 
 ### Remote Tools
@@ -105,7 +102,7 @@ The container mounts `~/workspace` → `/workspace` via `-v /home/${GPU_USER}/wo
 
 Remote tools read credentials from:
 1. Environment variables (`process.env`) — priority
-2. `.opencode/remote-ssh.env` — fallback (gitignored, contains credentials)
+2. `agent-tools/config/remote-ssh.env` — fallback (gitignored, contains credentials)
 
 Required variables:
 - `GPU_HOST` — Remote MT-GPU Machine hostname or IP
@@ -114,8 +111,6 @@ Required variables:
 - `GPU_PORT` — SSH port (default: 22)
 - `GPU_WORK_DIR` — Default remote working directory (default: ~)
 - `TORCH_MUSA_DOCKER_IMAGE` — Default Docker image for `remote-docker` one-shot runs
-
-The `remote-ssh` plugin injects these env vars into the shell environment for all tool calls.
 
 ## Deployment Workflow Priority
 
@@ -143,7 +138,7 @@ For driver-only operations (upgrade, downgrade, reinstall), use `skills/update_m
 
 ### SDK Compatibility Mapping
 
-`sdk_compatibility.yml` contains compatibility mapping for SDK version, driver version, target environment, and supported validation images.
+`skills/deploy_musa_base_env/config/sdk_compatibility.yml` contains compatibility mapping for SDK version, driver version, target environment, and supported validation images.
 
 Current default:
 - `sdk_version`: `4.3.1`
@@ -157,7 +152,7 @@ Current default:
 Create local runtime config from template (do not commit real credentials):
 
 ```bash
-cp .opencode/remote-ssh.env.example .opencode/remote-ssh.env
+cp agent-tools/config/remote-ssh.env.example agent-tools/config/remote-ssh.env
 ```
 
 ## Code Style Guidelines

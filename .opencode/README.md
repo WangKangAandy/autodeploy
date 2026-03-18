@@ -1,16 +1,23 @@
 # .opencode
 
-This directory contains the OpenCode plugin and custom tools used by this repository.
+This directory contains the OpenCode plugin for remote SSH configuration injection.
 
 ## Files
 
 - `plugin/remote-ssh.ts`: injects remote SSH-related environment variables into tool execution
-- `tools/remote-exec.ts`: runs commands on the remote host via SSH
-- `tools/remote-docker.ts`: runs commands inside a Docker container on the remote host
-- `tools/remote-sync.ts`: checked-in placeholder; not yet implemented locally
 - `remote-ssh.env.example`: template for local remote connection configuration
 
+## Note
+
+The OpenCode tools (`remote-exec`, `remote-docker`, `remote-sync`) have been migrated to the unified `agent-tools/` package.
+
+For tool usage, see:
+- `agent-tools/README.md` - Complete tool documentation
+- `agent-tools/src/core/` - Core executor functions for direct import
+
 ## Local Setup
+
+If using the OpenCode plugin:
 
 ```bash
 cd .opencode
