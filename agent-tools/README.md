@@ -270,6 +270,35 @@ npm run clean    # Clean dist directory
 npm run dev      # Build and run server
 ```
 
+## Testing
+
+Run unit tests:
+
+```bash
+npm test
+```
+
+Run tests in watch mode:
+
+```bash
+npm run test:watch
+```
+
+Generate coverage report:
+
+```bash
+npm run test:coverage
+```
+
+### Test Structure
+
+```
+tests/
+├── utils.test.ts         # Utility functions tests
+├── docker-builder.test.ts # Docker command builder tests
+└── executors.test.ts     # SSH executor tests (mocked)
+```
+
 ## Security
 
 - Configuration files contain sensitive information (passwords)

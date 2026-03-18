@@ -112,6 +112,16 @@ cp config/.env.example config/.env
 npm run dev
 ```
 
+## Run Tests
+
+```bash
+# Agent Tools tests
+cd agent-tools && npm test
+
+# Feishu Bridge tests
+cd feishu-claude-bridge && npm test
+```
+
 ## Scope
 
 The default automation scope in this repo is the base environment only:

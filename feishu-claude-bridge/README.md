@@ -165,6 +165,26 @@ npm run dev          # 开发模式
 npm run build        # 构建
 npm run start        # 生产模式
 npm run type-check   # 类型检查
+npm run test         # 运行测试
+npm run test:watch   # 测试监听模式
+npm run test:coverage # 生成覆盖率报告
+```
+
+## 测试
+
+```bash
+npm run test            # 运行所有测试
+npm run test:watch      # 监听模式
+npm run test:coverage   # 生成覆盖率报告
+```
+
+### 测试文件结构
+
+```
+tests/
+├── credential-parser.test.ts  # 凭据解析测试
+├── tool-client.test.ts        # 工具客户端测试
+└── skill-loader.test.ts       # 技能加载测试
 ```
 
 ## 许可证
