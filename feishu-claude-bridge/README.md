@@ -1,56 +1,217 @@
-# 飞书 Claude 桥接系统
+# 多平台 Claude 桥接系统
 
-将飞书机器人与 Claude AI 连接的桥接系统，支持直接调用 Claude API 和远程 GPU 工具。
+将多个聊天平台（飞书、钉钉等）与 Claude AI 连接的桥接系统，支持直接调用 Claude API 和远程 GPU 工具。
+
+## 架构特性
+
+- **多平台支持**: 飞书、钉钉，可扩展更多平台
+- **插件化架构**: 新平台只需实现适配器接口
+- **配置驱动**: 通过环境变量启用/禁用平台
+- **统一消息处理**: 所有平台使用统一的消息格式
 
 ## 快速开始
 
-### 1. 配置
+### 1. 安装依赖
 
 ```bash
 cd feishu-claude-bridge
 npm install
-cp config/.env.example config/.env
-# 编辑 config/.env 填入飞书和 Claude API 配置
 ```
 
-### 2. 启动
+### 2. 配置环境变量
+
+```bash
+cp config/.env.example config/.env
+# 编辑 config/.env 填入平台和 Claude API 配置
+```
+
+### 3. 启动服务
 
 ```bash
 npm run dev
 ```
 
 系统会自动启动：
-- 飞书 Webhook 接收服务器（端口 3000）
+- 多平台 Webhook 接收服务器（端口 3000）
 - Claude API 集成（自动处理消息）
 - 远程工具支持（GPU 操作）
 
-## 功能特性
+## 支持的平台
 
-- **Claude API 集成**: 直接调用 Claude API 生成响应，无需手动处理
-- **远程工具支持**: 集成 agent-tools 执行远程命令和 GPU 操作
-- **技能系统集成**: 自动加载仓库 skills，提供 MUSA 运维能力
-- **多格式支持**: 文本、图片、文件、视频、音频、URL
-- **双向通信**: 私聊和群聊 @ 提问
-- **CLI 工具**: 交互式命令行处理消息
+### 飞书 (Feishu/Lark)
+
+```bash
+# 飞书配置
+FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
+FEISHU_APP_SECRET=xxxxxxxxxxxxxxxx
+FEISHU_VERIFICATION_TOKEN=xxxxxxxxxxxxxxx
+FEISHU_ENCRYPT_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**Webhook 路径**: `/webhook/feishu`
+
+### 钉钉 (DingTalk)
+
+```bash
+# 钉钉配置
+DINGTALK_APP_KEY=xxxxxxxxxxxxxxxx
+DINGTALK_APP_SECRET=xxxxxxxxxxxxxxxx
+DINGTALK_AGENT_ID=xxxxxxxxxxxxxxxx
+DINGTALK_ENCODING_AES_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DINGTALK_ENABLED=true
+```
+
+**Webhook 路径**: `/webhook/dingtalk`
+
+## 配置说明
+
+### 完整环境变量
+
+```bash
+# 服务器配置
+PORT=3000
+NODE_ENV=development
+
+# Claude API 配置
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
+CLAUDE_MODEL=claude-sonnet-4-20250514
+
+# 飞书配置
+FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
+FEISHU_APP_SECRET=xxxxxxxxxxxxxxxx
+FEISHU_VERIFICATION_TOKEN=xxxxxxxxxxxxxxx
+FEISHU_ENCRYPT_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# 钉钉配置（可选）
+DINGTALK_APP_KEY=xxxxxxxxxxxxxxxx
+DINGTALK_APP_SECRET=xxxxxxxxxxxxxxxx
+DINGTALK_AGENT_ID=xxxxxxxxxxxxxxxx
+DINGTALK_ENCODING_AES_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DINGTALK_ENABLED=true
+
+# 远程 GPU 配置（用于 agent-tools）
+GPU_HOST=192.168.x.x
+GPU_USER=username
+GPU_SSH_PASSWD=password
+MY_SUDO_PASSWD=sudo_password
+TORCH_MUSA_DOCKER_IMAGE=registry.mthreads.com/...
+
+# 消息队列配置
+MESSAGE_QUEUE_DIR=./messages
+RESPONSE_QUEUE_DIR=./responses
+```
+
+### 多平台配置 (JSON 格式)
+
+也可以使用 `PLATFORMS` 环境变量配置多个平台：
+
+```bash
+PLATFORMS='[
+  {"type": "feishu", "enabled": true, "appId": "cli_xxx", "appSecret": "xxx"},
+  {"type": "dingtalk", "enabled": true, "appKey": "xxx", "appSecret": "xxx", "agentId": "xxx", "encodingAESKey": "xxx"}
+]'
+```
+
+## 项目结构
+
+```
+feishu-claude-bridge/
+├── src/
+│   ├── index.ts                    # 入口
+│   ├── server.ts                   # 多平台服务器
+│   ├── claude-client.ts            # Claude API 客户端
+│   │
+│   ├── core/                       # 核心抽象层
+│   │   ├── types.ts                # 统一接口定义
+│   │   ├── registry.ts             # 平台注册中心
+│   │   ├── message-bus.ts          # 消息总线
+│   │   └── handler.ts              # 统一消息处理器
+│   │
+│   ├── platforms/                  # 平台适配器
+│   │   ├── base.ts                 # 适配器基类
+│   │   ├── feishu/                 # 飞书适配器
+│   │   │   ├── adapter.ts
+│   │   │   ├── api.ts
+│   │   │   ├── webhook.ts
+│   │   │   ├── formatter.ts
+│   │   │   └── types.ts
+│   │   └── dingtalk/               # 钉钉适配器
+│   │       ├── adapter.ts
+│   │       ├── api.ts
+│   │       ├── webhook.ts
+│   │       ├── formatter.ts
+│   │       └── types.ts
+│   │
+│   ├── config/                     # 配置管理
+│   └── utils/                      # 工具函数
+│
+├── tests/                          # 测试文件
+└── messages/                       # 消息队列目录
+```
+
+## 添加新平台
+
+添加新平台只需 3 步：
+
+### 1. 创建适配器目录
+
+```bash
+mkdir -p src/platforms/wecom
+```
+
+### 2. 实现适配器
+
+```typescript
+// src/platforms/wecom/adapter.ts
+import { BaseAdapter } from "../base.js"
+import type { SendOptions, MessageResult } from "../../core/types.js"
+
+export class WecomAdapter extends BaseAdapter {
+  readonly id = "wecom"
+  readonly name = "企业微信"
+
+  protected async onInitialize(): Promise<void> {
+    // 初始化逻辑
+  }
+
+  getWebhookPath(): string {
+    return "wecom"
+  }
+
+  async handleWebhook(req, res): Promise<void> {
+    // 处理 webhook
+  }
+
+  async sendMessage(targetId: string, content: string, options?: SendOptions): Promise<MessageResult> {
+    // 发送消息
+  }
+}
+```
+
+### 3. 注册适配器
+
+```typescript
+// src/platforms/wecom/index.ts
+import { registry } from "../../core/registry.js"
+import { WecomAdapter } from "./adapter.js"
+
+registry.register("wecom", WecomAdapter)
+```
+
+**无需修改任何核心代码！**
+
+## API 端点
+
+| 端点 | 方法 | 描述 |
+|------|------|------|
+| `/health` | GET | 健康检查，返回已启用的平台列表 |
+| `/platforms` | GET | 查看所有注册的平台和 webhook 路径 |
+| `/webhook/feishu` | POST | 飞书 Webhook |
+| `/webhook/dingtalk` | POST | 钉钉 Webhook |
 
 ## 与 agent-tools 集成
 
-飞书机器人集成了 `agent-tools` 的远程执行能力：
-
-```typescript
-import { ToolClient } from "./tool-client.js"
-
-const client = ToolClient.fromEnv()
-
-// 执行远程命令
-const result = await client.execCommand("mthreads-gmi")
-
-// 执行 Docker 命令
-await client.execDocker("python train.py", { name: "torch_musa_test" })
-
-// 获取 GPU 状态
-const gpuStatus = await client.getGpuStatus()
-```
+系统集成了 `agent-tools` 的远程执行能力：
 
 ### 可用工具
 
@@ -59,104 +220,18 @@ const gpuStatus = await client.getGpuStatus()
 | `remote_exec` | 执行远程 shell 命令 |
 | `remote_docker` | 在 Docker 容器中执行命令 |
 | `get_gpu_status` | 获取 GPU 状态 |
+| `check_musa_status` | 检查 MUSA 环境状态 |
 
-### 技能支持
+### 使用示例
 
-系统自动加载仓库中的 skills：
-- `deploy_musa_full_env` - MUSA 环境部署
-- `update_musa_driver` - 驱动更新
-
-## 配置说明
-
-### 环境变量
-
-```bash
-# 服务器配置
-PORT=3000
-NODE_ENV=development
-
-# 飞书配置
-FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxxxxxxxx
-FEISHU_VERIFICATION_TOKEN=xxxxxxxxxxxxxxx
-FEISHU_ENCRYPT_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Claude API 配置
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
-
-# 远程 GPU 配置（用于 agent-tools）
-GPU_HOST=192.168.x.x
-GPU_USER=username
-GPU_SSH_PASSWD=password
-MY_SUDO_PASSWD=sudo_password
-TORCH_MUSA_DOCKER_IMAGE=registry.mthreads.com/...
-```
-
-### 飞书应用配置
-
-详见 [SETUP.md](./SETUP.md)
-
-## CLI 命令
-
-```bash
-# 交互式模式（推荐）
-npm run cli
-
-# 列出待处理消息
-npm run cli list
-
-# 查看消息详情
-npm run cli show <request-id>
-
-# 发送响应
-npm run cli respond <request-id> "回复内容"
-
-# 清理所有消息
-npm run cli clear
-```
-
-## 项目结构
+在聊天中发送消息，Claude 会自动调用工具：
 
 ```
-feishu-claude-bridge/
-├── config/
-│   └── .env.example          # 环境变量模板
-├── messages/                  # 消息队列目录
-├── responses/                 # 响应队列目录
-├── src/
-│   ├── claude-client.ts       # Claude API 客户端
-│   ├── tool-client.ts         # agent-tools 集成
-│   ├── system-prompt.ts       # 系统提示词生成
-│   ├── skill-loader.ts        # 技能加载器
-│   ├── handlers/              # 消息处理器
-│   ├── message/               # 消息格式化
-│   └── server.ts              # HTTP 服务器
-├── SETUP.md                   # 飞书配置详细指南
-└── README.md                  # 本文件
+用户: 帮我查看 GPU 状态
+主机: 192.168.1.100
+用户名: root
+密码: xxxxxx
 ```
-
-## API 端点
-
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/queue` | GET | 查看消息队列 |
-| `/webhook/feishu` | POST | 飞书 Webhook |
-
-## 故障排查
-
-### 收不到消息
-1. 检查飞书应用权限 (`im:message`, `im:chat`)
-2. 检查事件订阅 (`im.message.receive_v1`)
-3. 确认 Webhook 地址正确
-
-### Claude 响应失败
-1. 检查 `ANTHROPIC_API_KEY` 是否正确
-2. 查看服务器日志
-
-### 远程工具失败
-1. 检查 `GPU_HOST`, `GPU_USER`, `GPU_SSH_PASSWD` 配置
-2. 确认远程机器可访问
 
 ## 开发命令
 
@@ -167,7 +242,6 @@ npm run start        # 生产模式
 npm run type-check   # 类型检查
 npm run test         # 运行测试
 npm run test:watch   # 测试监听模式
-npm run test:coverage # 生成覆盖率报告
 ```
 
 ## 测试
@@ -178,14 +252,34 @@ npm run test:watch      # 监听模式
 npm run test:coverage   # 生成覆盖率报告
 ```
 
-### 测试文件结构
+### 测试结构
 
 ```
 tests/
-├── credential-parser.test.ts  # 凭据解析测试
-├── tool-client.test.ts        # 工具客户端测试
-└── skill-loader.test.ts       # 技能加载测试
+├── core/
+│   ├── registry.test.ts      # 平台注册中心测试
+│   └── message-bus.test.ts   # 消息总线测试
+├── platforms/
+│   └── feishu/
+│       └── formatter.test.ts # 飞书格式化测试
+├── credential-parser.test.ts # 凭据解析测试
+└── tool-client.test.ts       # 工具客户端测试
 ```
+
+## 故障排查
+
+### 收不到消息
+1. 检查平台应用权限
+2. 检查事件订阅配置
+3. 确认 Webhook 地址正确
+
+### Claude 响应失败
+1. 检查 `ANTHROPIC_API_KEY` 是否正确
+2. 查看服务器日志
+
+### 平台初始化失败
+1. 检查平台配置是否完整
+2. 查看启动日志中的错误信息
 
 ## 许可证
 

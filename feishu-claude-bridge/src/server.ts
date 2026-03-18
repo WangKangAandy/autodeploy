@@ -1,36 +1,30 @@
 import type { Request, Response } from "express"
 import express from "express"
 import type { AppConfig } from "./config/types.js"
-import { MessageProcessor } from "./message/processor.js"
-import { MessageFormatter } from "./message/formatter.js"
-import { PrivateChatHandler } from "./handlers/private-chat.js"
-import { GroupChatHandler } from "./handlers/group-chat.js"
-import { WebhookVerifier } from "./webhook/verifier.js"
-import { initTokenManager, getAppAccessToken } from "./utils/helpers.js"
+import { registry } from "./core/registry.js"
+import { messageBus } from "./core/message-bus.js"
+import { UnifiedMessageHandler } from "./core/handler.js"
+import { ClaudeClient } from "./claude-client.js"
 import { logger } from "./utils/logger.js"
-import type { FeishuMessageEvent } from "./message/types.js"
 
+// Import all platform adapters (auto-registers them)
+import "./platforms/index.js"
+
+/**
+ * Multi-Platform Bot Server
+ *
+ * Provides a unified webhook server for multiple chat platforms.
+ * Platform adapters are automatically loaded from configuration.
+ */
 export class Server {
   private app: express.Express
   private config: AppConfig
-  private messageProcessor: MessageProcessor
-  private messageFormatter: MessageFormatter
-  private webhookVerifier: WebhookVerifier
-  private botOpenId: string = ""
+  private claudeClient!: ClaudeClient
+  private messageHandler!: UnifiedMessageHandler
 
   constructor(config: AppConfig) {
     this.config = config
     this.app = express()
-
-    // Initialize message processor and formatter
-    this.messageProcessor = new MessageProcessor(
-      config.queue.messageQueueDir,
-      config.queue.responseQueueDir
-    )
-    this.messageFormatter = new MessageFormatter()
-
-    // Initialize webhook verifier
-    this.webhookVerifier = new WebhookVerifier(config.feishu.encryptKey)
 
     // Setup middleware
     this.app.use(express.json())
@@ -44,155 +38,85 @@ export class Server {
 
     // Health check endpoint
     this.app.get("/health", (_req: Request, res: Response) => {
+      const enabledPlatforms = registry.getEnabledPlatforms()
       res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        messageQueue: this.messageProcessor.getMessageQueue().length
+        platforms: enabledPlatforms,
+        messageQueue: messageBus.getQueueSize()
       })
     })
 
-    // Message queue status endpoint
-    this.app.get("/queue", (_req: Request, res: Response) => {
-      const queue = this.messageProcessor.getMessageQueue()
+    // Platform status endpoint
+    this.app.get("/platforms", (_req: Request, res: Response) => {
+      const registered = registry.getRegisteredPlatforms()
+      const enabled = registry.getEnabledPlatforms()
+
       res.json({
-        status: "ok",
-        queueSize: queue.length,
-        messages: queue
+        registered,
+        enabled,
+        adapters: enabled.map((id) => {
+          const adapter = registry.getAdapter(id)
+          return {
+            id,
+            name: adapter?.name,
+            webhookPath: `/webhook/${adapter?.getWebhookPath()}`
+          }
+        })
       })
     })
 
-    // Webhook endpoint for Feishu
-    this.app.post("/webhook/feishu", this.handleWebhook.bind(this))
-
-    // 404 handler
-    this.app.use((_req: Request, res: Response) => {
-      res.status(404).json({ error: "Not found" })
-    })
-
-    // Error handler
-    this.app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) => {
-      logger.error(`Server error: ${err.message}`)
-      res.status(500).json({ error: "Internal server error" })
-    })
+    // Note: 404 and error handlers will be added after webhook routes are registered in start()
   }
 
-  async handleWebhook(req: Request, res: Response): Promise<void> {
-    try {
-      // Debug: log the incoming request
-      logger.info(`Incoming webhook: type=${req.body?.type}, event_type=${req.body?.header?.event_type}`)
-      logger.info(`Full request body: ${JSON.stringify(req.body)}`)
-
-      // Handle URL verification challenge
-      // 飞书平台会先验证URL，验证成功后才能获取到 Verification Token 和 Encrypt Key
-      // 所以这里暂时不做 token 校验，直接返回 challenge
-      if (req.body?.type === "url_verification") {
-        const { challenge, token } = req.body
-        logger.info(`URL verification request received, token: ${token}`)
-
-        // 如果已配置 verificationToken，则校验；否则跳过校验
-        if (this.config.feishu.verificationToken && this.config.feishu.verificationToken.length > 0) {
-          if (token !== this.config.feishu.verificationToken) {
-            logger.warn(`Invalid verification token, expected: ${this.config.feishu.verificationToken}`)
-            res.status(401).json({ error: "Invalid verification token" })
-            return
-          }
-        }
-
-        logger.info("URL verification successful")
-        res.json({ challenge })
-        return
-      }
-
-      // Handle message events
-      if (req.body?.header?.event_type === "im.message.receive_v1") {
-        // Verify signature if headers are present
-        const timestamp = req.headers["x-lark-request-timestamp"] as string
-        const nonce = req.headers["x-lark-request-nonce"] as string
-        const signature = req.headers["x-lark-signature"] as string
-
-        if (timestamp && nonce && signature) {
-          const body = JSON.stringify(req.body)
-          const isValid = this.webhookVerifier.verify({
-            timestamp,
-            nonce,
-            body,
-            encryptKey: this.config.feishu.encryptKey,
-            signature
-          })
-
-          if (!isValid) {
-            logger.warn("Invalid webhook signature")
-            res.status(401).json({ error: "Invalid signature" })
-            return
-          }
-        }
-
-        // Process the event asynchronously
-        const event = req.body as FeishuMessageEvent
-        this.processMessageEvent(event).catch((error) => {
-          logger.error(`Error processing message event: ${error}`)
-        })
-
-        res.status(200).json({ code: 0, msg: "success" })
-        return
-      }
-
-      res.status(400).json({ error: "Unsupported event type" })
-    } catch (error) {
-      logger.error(`Webhook error: ${error}`)
-      res.status(500).json({ error: "Internal server error" })
-    }
-  }
-
-  private async processMessageEvent(event: FeishuMessageEvent): Promise<void> {
-    const chatType = event.event.message.chat_type
-
-    if (chatType === "p2p") {
-      const handler = new PrivateChatHandler(
-        this.messageProcessor,
-        this.messageFormatter,
-        this.botOpenId
-      )
-      await handler.handle(event)
-    } else if (chatType === "group") {
-      const handler = new GroupChatHandler(
-        this.messageProcessor,
-        this.messageFormatter,
-        this.botOpenId
-      )
-      await handler.handle(event)
-    }
-  }
-
+  /**
+   * Start the server
+   */
   async start(): Promise<void> {
     try {
-      // Initialize token manager for automatic token refresh
-      initTokenManager(this.config.feishu.appId, this.config.feishu.appSecret)
+      // Initialize Claude client
+      this.claudeClient = new ClaudeClient({
+        apiKey: this.config.claude.apiKey,
+        model: this.config.claude.model,
+        systemPrompt: this.config.claude.systemPrompt,
+        maxTokens: this.config.claude.maxTokens
+      })
+      logger.info(`Claude client initialized with model: ${this.config.claude.model}`)
 
-      // Get app access token
-      logger.info("Getting Feishu app access token...")
-      const appAccessToken = await getAppAccessToken(
-        this.config.feishu.appId,
-        this.config.feishu.appSecret
-      )
-      logger.info("App access token obtained")
+      // Initialize message handler
+      this.messageHandler = new UnifiedMessageHandler(this.config, this.claudeClient)
 
-      // Get bot info to get open_id
-      logger.info("Getting bot info...")
-      const baseUrl = process.env.FEISHU_BASE_URL || "https://open.feishu.cn"
-      const botInfoResponse = await fetch(`${baseUrl}/open-apis/bot/v3/info`, {
-        headers: {
-          Authorization: `Bearer ${appAccessToken}`
-        }
+      // Subscribe handler to message bus
+      messageBus.subscribe(this.messageHandler.handle.bind(this.messageHandler))
+
+      // Initialize all enabled platforms
+      const adapters = await registry.initializeFromConfig(this.config.platforms)
+
+      // Register webhook routes for each platform
+      for (const adapter of adapters) {
+        const webhookPath = `/webhook/${adapter.getWebhookPath()}`
+        this.app.post(
+          webhookPath,
+          (req: Request, res: Response) => {
+            adapter.handleWebhook(req, res).catch((error) => {
+              logger.error(`Webhook error for ${adapter.name}: ${error}`)
+              res.status(500).json({ error: "Internal server error" })
+            })
+          }
+        )
+        logger.info(`Platform "${adapter.name}" registered at ${webhookPath}`)
+      }
+
+      // Add 404 handler after all routes are registered
+      this.app.use((_req: Request, res: Response) => {
+        res.status(404).json({ error: "Not found" })
       })
 
-      if (botInfoResponse.ok) {
-        const botInfo = (await botInfoResponse.json()) as { code: number; bot: { open_id: string } }
-        if (botInfo.code === 0 && botInfo.bot.open_id) {
-          this.botOpenId = botInfo.bot.open_id
-          logger.info(`Bot open_id: ${this.botOpenId}`)
-        }
-      }
+      // Add error handler
+      this.app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) => {
+        logger.error(`Server error: ${err.message}`)
+        res.status(500).json({ error: "Internal server error" })
+      })
 
       // Start server with auto port switching
       const basePort = this.config.server.port
@@ -205,7 +129,7 @@ export class Server {
           await new Promise<void>((resolve, reject) => {
             this.app.listen(port, () => {
               logger.info(`Server listening on port ${port}`)
-              logger.info(`Environment: ${this.config.server.nodeEnv}`)
+              logger.info(`Environment: ${this.config.server.nodeEnv || "development"}`)
               logger.info(`Message queue: ${this.config.queue.messageQueueDir}`)
               logger.info(`Response queue: ${this.config.queue.responseQueueDir}`)
               resolve()
@@ -220,13 +144,54 @@ export class Server {
           logger.warn(`Port ${port} is busy, trying next port...`)
         }
       }
+
+      // Log startup info
+      logger.info("")
+      logger.info("========================================")
+      logger.info("Multi-Platform Bot Server is running!")
+      logger.info("========================================")
+      logger.info("")
+      logger.info(`Enabled platforms: ${registry.getEnabledPlatforms().join(", ")}`)
+      logger.info(`Model: ${this.config.claude.model}`)
+      logger.info("")
+      logger.info("Endpoints:")
+      logger.info(`  Health: http://localhost:${this.config.server.port}/health`)
+      logger.info(`  Platforms: http://localhost:${this.config.server.port}/platforms`)
+      logger.info("")
+      logger.info("========================================")
     } catch (error) {
       logger.error(`Failed to start server: ${error}`)
       throw error
     }
   }
 
-  stop(): void {
+  /**
+   * Stop the server
+   */
+  async stop(): Promise<void> {
+    messageBus.stopProcessing()
+    await registry.disposeAll()
     logger.info("Server stopped")
+  }
+
+  /**
+   * Get the Express app instance
+   */
+  getApp(): express.Express {
+    return this.app
+  }
+
+  /**
+   * Get the Claude client
+   */
+  getClaudeClient(): ClaudeClient {
+    return this.claudeClient
+  }
+
+  /**
+   * Get the message handler
+   */
+  getMessageHandler(): UnifiedMessageHandler {
+    return this.messageHandler
   }
 }
