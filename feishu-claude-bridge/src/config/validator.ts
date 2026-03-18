@@ -65,11 +65,17 @@ const AppConfigSchema = z.object({
  * Load legacy Feishu configuration from environment variables
  */
 function loadLegacyFeishuConfig(): PlatformConfig {
+  // Get connection mode from env, default to webhook for backward compatibility
+  // Set FEISHU_CONNECTION_MODE=long-connection to use WebSocket mode
+  const connectionMode = getEnvVar("FEISHU_CONNECTION_MODE", false) || "webhook"
+
   return {
     type: "feishu",
     enabled: true,
     appId: getEnvVar("FEISHU_APP_ID", true)!,
     appSecret: getEnvVar("FEISHU_APP_SECRET", true)!,
+    connectionMode: connectionMode as "webhook" | "long-connection",
+    // These are only required for webhook mode
     verificationToken: getEnvVar("FEISHU_VERIFICATION_TOKEN", false) || "",
     encryptKey: getEnvVar("FEISHU_ENCRYPT_KEY", false) || ""
   }

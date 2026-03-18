@@ -10,11 +10,18 @@ import { logger } from "./utils/logger.js"
 // Import all platform adapters (auto-registers them)
 import "./platforms/index.js"
 
+// Import FeishuAdapter type to check connection mode
+import { FeishuAdapter } from "./platforms/feishu/index.js"
+
 /**
  * Multi-Platform Bot Server
  *
  * Provides a unified webhook server for multiple chat platforms.
  * Platform adapters are automatically loaded from configuration.
+ *
+ * Supports two connection modes for Feishu:
+ * - webhook: Receive events via HTTP webhook (requires public domain)
+ * - long-connection: Receive events via WebSocket (no public domain needed)
  */
 export class Server {
   private app: express.Express
@@ -39,10 +46,18 @@ export class Server {
     // Health check endpoint
     this.app.get("/health", (_req: Request, res: Response) => {
       const enabledPlatforms = registry.getEnabledPlatforms()
+      const platformDetails = enabledPlatforms.map((id) => {
+        const adapter = registry.getAdapter(id)
+        if (adapter instanceof FeishuAdapter) {
+          return { id, name: adapter.name, mode: adapter.getConnectionMode() }
+        }
+        return { id, name: adapter?.name }
+      })
+
       res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
-        platforms: enabledPlatforms,
+        platforms: platformDetails,
         messageQueue: messageBus.getQueueSize()
       })
     })
@@ -57,11 +72,23 @@ export class Server {
         enabled,
         adapters: enabled.map((id) => {
           const adapter = registry.getAdapter(id)
-          return {
+          const info: Record<string, unknown> = {
             id,
             name: adapter?.name,
-            webhookPath: `/webhook/${adapter?.getWebhookPath()}`
           }
+
+          // Add connection mode for Feishu
+          if (adapter instanceof FeishuAdapter) {
+            info.mode = adapter.getConnectionMode()
+            info.longConnectionActive = adapter.isLongConnectionActive()
+            if (adapter.getConnectionMode() === "webhook") {
+              info.webhookPath = `/webhook/${adapter.getWebhookPath()}`
+            }
+          } else {
+            info.webhookPath = `/webhook/${adapter?.getWebhookPath()}`
+          }
+
+          return info
         })
       })
     })
@@ -92,8 +119,15 @@ export class Server {
       // Initialize all enabled platforms
       const adapters = await registry.initializeFromConfig(this.config.platforms)
 
-      // Register webhook routes for each platform
+      // Register webhook routes for platforms that use webhook mode
       for (const adapter of adapters) {
+        // Check if this is Feishu adapter in long-connection mode
+        if (adapter instanceof FeishuAdapter && adapter.getConnectionMode() === "long-connection") {
+          logger.info(`Platform "${adapter.name}" using long-connection mode (no webhook route needed)`)
+          continue
+        }
+
+        // Register webhook route for webhook-based platforms
         const webhookPath = `/webhook/${adapter.getWebhookPath()}`
         this.app.post(
           webhookPath,
@@ -153,6 +187,15 @@ export class Server {
       logger.info("")
       logger.info(`Enabled platforms: ${registry.getEnabledPlatforms().join(", ")}`)
       logger.info(`Model: ${this.config.claude.model}`)
+
+      // Log connection modes
+      for (const id of registry.getEnabledPlatforms()) {
+        const adapter = registry.getAdapter(id)
+        if (adapter instanceof FeishuAdapter) {
+          logger.info(`  - ${adapter.name}: ${adapter.getConnectionMode()} mode`)
+        }
+      }
+
       logger.info("")
       logger.info("Endpoints:")
       logger.info(`  Health: http://localhost:${this.config.server.port}/health`)

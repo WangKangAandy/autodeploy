@@ -6,14 +6,21 @@ import type {
 import { BaseAdapter } from "../base.js"
 import { FeishuApiClient } from "./api.js"
 import { FeishuWebhook } from "./webhook.js"
+import { FeishuLongConnection } from "./long-connection.js"
 import { FeishuFormatter } from "./formatter.js"
 import type { FeishuMessageEvent } from "./types.js"
 import { messageBus } from "../../core/message-bus.js"
+
+/** Connection mode for Feishu */
+export type FeishuConnectionMode = "webhook" | "long-connection"
 
 /**
  * Feishu (Lark) Platform Adapter
  *
  * Implements the PlatformAdapter interface for Feishu/Lark platform.
+ * Supports two connection modes:
+ * - webhook: Receive events via HTTP webhook (requires public domain)
+ * - long-connection: Receive events via WebSocket (no public domain needed)
  */
 export class FeishuAdapter extends BaseAdapter {
   readonly id = "feishu"
@@ -21,8 +28,10 @@ export class FeishuAdapter extends BaseAdapter {
 
   private apiClient!: FeishuApiClient
   private webhook!: FeishuWebhook
+  private longConnection!: FeishuLongConnection
   private formatter: FeishuFormatter
   private botOpenId: string = ""
+  private connectionMode: FeishuConnectionMode = "webhook"
 
   constructor() {
     super()
@@ -38,11 +47,18 @@ export class FeishuAdapter extends BaseAdapter {
     const encryptKey = this.getConfig<string>("encryptKey", "")
     const verificationToken = this.getConfig<string>("verificationToken", "")
 
-    // Initialize API client
+    // Get connection mode from config
+    const mode = this.getConfig<string>("connectionMode", "webhook")
+    this.connectionMode = mode as FeishuConnectionMode
+
+    // Initialize API client (used for both modes)
     this.apiClient = new FeishuApiClient(appId, appSecret)
 
     // Initialize webhook handler
     this.webhook = new FeishuWebhook(encryptKey, verificationToken)
+
+    // Initialize long connection client
+    this.longConnection = new FeishuLongConnection(appId, appSecret)
 
     // Get bot info
     try {
@@ -50,22 +66,39 @@ export class FeishuAdapter extends BaseAdapter {
       this.botOpenId = botInfo.open_id
       this.botInfo = { id: botInfo.open_id, name: "Claude Bot" }
       this.log(`Bot open_id: ${this.botOpenId}`)
+
+      // Pass bot open ID to long connection client
+      this.longConnection.setBotOpenId(this.botOpenId)
     } catch (error) {
       this.log(`Warning: Could not fetch bot info: ${error}`, "warn")
+    }
+
+    // Start long connection if mode is long-connection
+    if (this.connectionMode === "long-connection") {
+      this.log("Starting in long-connection mode")
+      await this.longConnection.start()
+    } else {
+      this.log("Starting in webhook mode")
     }
   }
 
   /**
-   * Webhook route path
+   * Webhook route path (only used in webhook mode)
    */
   getWebhookPath(): string {
     return "feishu"
   }
 
   /**
-   * Handle incoming webhook request
+   * Handle incoming webhook request (only used in webhook mode)
    */
   async handleWebhook(req: Request, res: Response): Promise<void> {
+    // In long-connection mode, webhook is not used
+    if (this.connectionMode === "long-connection") {
+      res.status(400).json({ error: "Webhook not available in long-connection mode" })
+      return
+    }
+
     try {
       // Handle URL verification
       if (this.webhook.handleUrlVerification(req, res)) {
@@ -99,7 +132,7 @@ export class FeishuAdapter extends BaseAdapter {
   }
 
   /**
-   * Process a message event
+   * Process a message event (webhook mode)
    */
   private async processMessageEvent(event: FeishuMessageEvent): Promise<void> {
     const unifiedMessage = this.formatter.parseToUnified(event)
@@ -161,5 +194,29 @@ export class FeishuAdapter extends BaseAdapter {
    */
   getFormatter(): FeishuFormatter {
     return this.formatter
+  }
+
+  /**
+   * Get current connection mode
+   */
+  getConnectionMode(): FeishuConnectionMode {
+    return this.connectionMode
+  }
+
+  /**
+   * Check if long connection is active
+   */
+  isLongConnectionActive(): boolean {
+    return this.longConnection?.isActive() || false
+  }
+
+  /**
+   * Dispose resources
+   */
+  async dispose(): Promise<void> {
+    if (this.longConnection) {
+      this.longConnection.stop()
+    }
+    this.log("Disposed")
   }
 }

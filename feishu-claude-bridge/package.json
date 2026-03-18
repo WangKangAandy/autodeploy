@@ -24,6 +24,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "uuid": "^9.0.1",

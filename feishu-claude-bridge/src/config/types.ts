@@ -1,6 +1,13 @@
 import type { PlatformId } from "../core/types.js"
 
 /**
+ * Feishu connection mode
+ * - webhook: Receive events via HTTP webhook (requires public domain)
+ * - long-connection: Receive events via WebSocket (no public domain needed)
+ */
+export type FeishuConnectionMode = "webhook" | "long-connection"
+
+/**
  * Legacy Feishu configuration (for backward compatibility)
  */
 export interface FeishuConfig {
@@ -66,7 +73,11 @@ export interface FeishuPlatformConfig extends PlatformConfig {
   type: "feishu"
   appId: string
   appSecret: string
+  /** Connection mode: webhook or long-connection */
+  connectionMode?: FeishuConnectionMode
+  /** Required for webhook mode */
   verificationToken?: string
+  /** Required for webhook mode */
   encryptKey?: string
 }
 
