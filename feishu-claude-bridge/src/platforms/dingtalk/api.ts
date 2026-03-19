@@ -200,106 +200,95 @@ export class DingTalkApiClient {
     return { id: this.agentId, name: "Claude Bot" }
   }
 
+  // 钉钉文档 MCP API 配置
+  private static readonly DINGTALK_DOCS_MCP_URL = "https://mcp.api-inference.modelscope.net/f1ca1e7fee654d/mcp"
+
   /**
-   * 获取钉钉文档内容
+   * 获取钉钉文档内容 (通过 MCP API)
    * 钉钉文档 URL 格式: https://alidocs.dingtalk.com/i/nodes/{docId}
-   * API 文档: https://open.dingtalk.com/document/orgapp/obtain-the-details-of-a-knowledge-base
-   * 权限要求: qyapi_wiki_read (企业知识库只读权限)
+   * 使用钉钉文档 MCP 服务，无需企业级应用权限
    */
   async fetchDocument(docId: string): Promise<{ success: boolean; content: string; title?: string; error?: string }> {
     try {
-      const token = await this.getAccessToken()
+      const docUrl = `https://alidocs.dingtalk.com/i/nodes/${docId}`
+      logger.info(`Fetching DingTalk document via MCP: ${docId}`)
 
-      // 钉钉知识库文档 API - 获取文档详情
-      // 需要权限: qyapi_wiki_read (企业知识库只读权限)
-      const response = await fetch(
-        `https://oapi.dingtalk.com/topapi/wiki/doc/detail?access_token=${token}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+      // 调用钉钉文档 MCP API
+      const response = await fetch(DingTalkApiClient.DINGTALK_DOCS_MCP_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method: "tools/call",
+          params: {
+            name: "get_document_content_by_url",
+            arguments: {
+              docUrl: docUrl,
+            },
           },
-          body: JSON.stringify({
-            doc_id: docId,
-          }),
-        }
-      )
+        }),
+      })
 
       if (!response.ok) {
         return {
           success: false,
           content: "",
-          error: `HTTP error: ${response.status}`,
+          error: `MCP API error: ${response.status}`,
         }
       }
 
-      const result = (await response.json()) as DingTalkApiResponse & {
+      const result = await response.json() as {
         result?: {
-          doc_name?: string
-          content?: string
-          text_content?: string
-          main_text?: string
+          content?: Array<{ type: string; text: string }>
+          structuredContent?: { content?: string; taskStatus?: number }
+          isError?: boolean
         }
-        sub_code?: string
-        sub_msg?: string
+        error?: { message?: string }
       }
 
-      // Handle permission errors
-      // 钉钉权限已从旧格式 qyapi_wiki_read 迁移到新 OAuth 2.0 格式
-      if (result.errcode === 88 && result.sub_code === "60011") {
+      // 检查 MCP 错误
+      if (result.error) {
         return {
           success: false,
           content: "",
-          error: `应用缺少知识库/文档读取权限。
-
-请在钉钉开发者后台开通以下权限：
-1. 进入应用 → 权限管理 → 申请权限
-2. 搜索并申请以下权限：
-   - Wiki.Workspace.Read (企业知识库只读权限)
-   - Document.WorkspaceDocument.Read (钉钉文档读取权限)
-3. 等待权限审批通过并生效（可能需要几分钟）
-
-注意：旧权限代码 qyapi_wiki_read 已废弃，新权限采用 OAuth 2.0 格式。
-
-错误详情: ${result.sub_msg}`,
+          error: `MCP error: ${result.error.message || "Unknown error"}`,
         }
       }
 
-      if (result.errcode !== 0) {
-        return {
-          success: false,
-          content: "",
-          error: `API error: ${result.errmsg} (errcode: ${result.errcode}, sub_code: ${result.sub_code || 'N/A'})`,
+      // 提取文档内容
+      let content = ""
+      if (result.result?.structuredContent?.content) {
+        content = result.result.structuredContent.content
+      } else if (result.result?.content?.[0]?.text) {
+        // 尝试解析嵌套的 JSON
+        try {
+          const inner = JSON.parse(result.result.content[0].text)
+          content = inner.content || ""
+        } catch {
+          content = result.result.content[0].text
         }
       }
-
-      const title = result.result?.doc_name || "钉钉文档"
-      // 钉钉文档内容可能在多个字段
-      const content = result.result?.text_content
-        || result.result?.main_text
-        || result.result?.content
-        || ""
 
       if (!content) {
         return {
           success: false,
           content: "",
-          error: `文档内容为空。文档可能不支持通过API读取，或内容格式不兼容。
-
-文档标题: ${title}
-文档ID: ${docId}
-
-请确认：
-1. 文档是企业知识库文档（而非个人文档）
-2. 应用有权限访问该文档
-3. 文档类型支持API读取`,
+          error: "文档内容为空或无法解析。请确认文档存在且您有访问权限。",
         }
       }
+
+      // 从内容中提取标题 (第一个标题行)
+      const titleMatch = content.match(/^#+\s+(.+)$/m)
+      const title = titleMatch ? titleMatch[1] : "钉钉文档"
 
       return { success: true, content, title }
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error)
-      logger.error(`Error fetching DingTalk document: ${errorMessage}`)
+      logger.error(`Error fetching DingTalk document via MCP: ${errorMessage}`)
       return { success: false, content: "", error: errorMessage }
     }
   }
