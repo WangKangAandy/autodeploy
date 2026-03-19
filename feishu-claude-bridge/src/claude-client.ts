@@ -3,6 +3,8 @@ import { logger } from "./utils/logger.js"
 import { ToolClient, type ToolClientConfig } from "./tool-client.js"
 import { generateSystemPrompt, getContextAwarePrompt } from "./system-prompt.js"
 import { parseCredentials } from "./credential-parser.js"
+import { FeishuApiClient } from "./platforms/feishu/api.js"
+import { parseFeishuDocUrl, parseFeishuFolderUrl } from "./utils/helpers.js"
 
 export interface ClaudeClientConfig {
   apiKey: string
@@ -10,6 +12,7 @@ export interface ClaudeClientConfig {
   maxTokens?: number
   systemPrompt?: string
   toolClient?: ToolClient
+  feishuApiClient?: FeishuApiClient
 }
 
 // Tool definitions for Claude API with dynamic credentials support
@@ -131,6 +134,62 @@ const TOOLS: Anthropic.Messages.Tool[] = [
       },
     },
   },
+  {
+    name: "fetch_doc",
+    description:
+      "根据飞书文档链接获取文档内容。当用户发送飞书文档链接时使用此工具读取文档内容。" +
+      "支持 docx 和 wiki 类型的文档链接。",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "飞书文档链接，如 https://feishu.cn/docx/DoxdSxxxxxxxxxx",
+        },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "create_doc",
+    description:
+      "创建一个新的飞书云文档。可以在指定文件夹中创建，或创建在「我的文档」根目录。" +
+      "创建成功后返回文档 ID 和链接。",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "文档标题",
+        },
+        folder_url: {
+          type: "string",
+          description: "目标文件夹链接（可选），如不提供则创建在「我的文档」根目录",
+        },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "update_doc",
+    description:
+      "向飞书文档追加文本内容。用于在创建文档后添加正文内容。" +
+      "每次调用会在文档末尾追加新的文本块。",
+    input_schema: {
+      type: "object",
+      properties: {
+        doc_id: {
+          type: "string",
+          description: "文档 ID（由 create_doc 返回）",
+        },
+        content: {
+          type: "string",
+          description: "要追加的文本内容",
+        },
+      },
+      required: ["doc_id", "content"],
+    },
+  },
 ]
 
 /**
@@ -142,6 +201,7 @@ export class ClaudeClient {
   private maxTokens: number
   private systemPrompt: string
   private defaultToolClient: ToolClient | undefined
+  private feishuApiClient: FeishuApiClient | undefined
   private conversationHistory: Map<string, Anthropic.Messages.MessageParam[]> = new Map()
   // Store dynamic credentials per user session
   private userCredentials: Map<string, ToolClientConfig> = new Map()
@@ -157,6 +217,7 @@ export class ClaudeClient {
     this.systemPrompt = config.systemPrompt || generateSystemPrompt()
 
     this.defaultToolClient = config.toolClient
+    this.feishuApiClient = config.feishuApiClient
 
     logger.info(`Claude client initialized with model: ${this.model}, tools: enabled`)
   }
@@ -315,7 +376,20 @@ export class ClaudeClient {
     try {
       const args = toolUse.input as Record<string, any>
 
-      // Get appropriate ToolClient
+      // Handle document tools separately (they use FeishuApiClient, not ToolClient)
+      switch (toolUse.name) {
+        case "fetch_doc": {
+          return await this.executeFetchDoc(args.url)
+        }
+        case "create_doc": {
+          return await this.executeCreateDoc(args.title, args.folder_url)
+        }
+        case "update_doc": {
+          return await this.executeUpdateDoc(args.doc_id, args.content)
+        }
+      }
+
+      // For remote execution tools, get appropriate ToolClient
       let client: ToolClient
       try {
         client = this.getToolClient(userId, {
@@ -358,6 +432,71 @@ export class ClaudeClient {
   }
 
   /**
+   * Execute fetch_doc tool
+   */
+  private async executeFetchDoc(url: string): Promise<string> {
+    if (!this.feishuApiClient) {
+      return "Error: Feishu API client not configured. Document access requires Feishu app credentials."
+    }
+
+    const docInfo = parseFeishuDocUrl(url)
+    if (!docInfo) {
+      return `Error: Invalid Feishu document URL. Expected format: https://feishu.cn/docx/{docId} or https://feishu.cn/wiki/{docId}`
+    }
+
+    logger.info(`Fetching document: ${docInfo.docId} (type: ${docInfo.docType})`)
+
+    const result = await this.feishuApiClient.fetchDocument(docInfo.docId)
+    if (!result.success) {
+      return `Error fetching document: ${result.error}`
+    }
+
+    return `**文档标题**: ${result.title}\n\n**文档内容**:\n${result.content}`
+  }
+
+  /**
+   * Execute create_doc tool
+   */
+  private async executeCreateDoc(title: string, folderUrl?: string): Promise<string> {
+    if (!this.feishuApiClient) {
+      return "Error: Feishu API client not configured. Document access requires Feishu app credentials."
+    }
+
+    let folderToken: string | undefined
+    if (folderUrl) {
+      const parsed = parseFeishuFolderUrl(folderUrl)
+      if (!parsed) {
+        return `Error: Invalid Feishu folder URL. Expected format: https://feishu.cn/drive/folder/{folderToken}`
+      }
+      folderToken = parsed
+      logger.info(`Creating document in folder: ${folderToken}`)
+    }
+
+    const result = await this.feishuApiClient.createDocument(title, folderToken)
+    if (!result.success) {
+      return `Error creating document: ${result.error}`
+    }
+
+    return `文档创建成功！\n\n**文档 ID**: ${result.docId}\n**文档链接**: ${result.docUrl}`
+  }
+
+  /**
+   * Execute update_doc tool
+   */
+  private async executeUpdateDoc(docId: string, content: string): Promise<string> {
+    if (!this.feishuApiClient) {
+      return "Error: Feishu API client not configured. Document access requires Feishu app credentials."
+    }
+
+    const result = await this.feishuApiClient.updateDocument(docId, content)
+    if (!result.success) {
+      return `Error updating document: ${result.error}`
+    }
+
+    return `文档更新成功！已追加内容到文档 ${docId}`
+  }
+
+  /**
    * Extract text content from Claude response
    */
   private extractText(response: Anthropic.Messages.Message): string {
@@ -374,6 +513,14 @@ export class ClaudeClient {
     this.conversationHistory.delete(userId)
     this.userCredentials.delete(userId)
     logger.info(`Conversation cleared for user ${userId}`)
+  }
+
+  /**
+   * Set the Feishu API client (called after platform adapters are initialized)
+   */
+  setFeishuApiClient(client: FeishuApiClient): void {
+    this.feishuApiClient = client
+    logger.info("Feishu API client configured for document access")
   }
 
   /**

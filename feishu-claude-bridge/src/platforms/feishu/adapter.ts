@@ -211,6 +211,13 @@ export class FeishuAdapter extends BaseAdapter {
   }
 
   /**
+   * Get the Feishu API client (for document access)
+   */
+  getApiClient(): FeishuApiClient {
+    return this.apiClient
+  }
+
+  /**
    * Dispose resources
    */
   async dispose(): Promise<void> {

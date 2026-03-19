@@ -184,3 +184,77 @@ export async function getAppAccessToken(
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * 从飞书文档 URL 提取文档信息
+ * 支持的 URL 格式:
+ * - https://feishu.cn/docx/DoxdSxxxxxxxxxxxxxx
+ * - https://feishu.cn/wiki/DoxdSxxxxxxxxxxxxxx
+ * - https://xxx.feishu.cn/docx/DoxdSxxxxxxxxxxxxxx
+ * - https://xxx.feishu.cn/wiki/DoxdSxxxxxxxxxxxxxx
+ * - https://open.feishu.cn/document/client/docx/DoxdSxxxxxxxxxxxxxx
+ */
+export function parseFeishuDocUrl(url: string): { docId: string; docType: string } | null {
+  try {
+    const urlObj = new URL(url)
+    const pathname = urlObj.pathname
+
+    // Match docx format: /docx/{docId} or /wiki/{docId}
+    const docxMatch = pathname.match(/\/(docx|wiki)\/([A-Za-z0-9]+)/)
+    if (docxMatch) {
+      return {
+        docType: docxMatch[1],
+        docId: docxMatch[2]
+      }
+    }
+
+    // Match open.feishu.cn format: /document/client/docx/{docId}
+    const openMatch = pathname.match(/\/document\/client\/(docx|wiki)\/([A-Za-z0-9]+)/)
+    if (openMatch) {
+      return {
+        docType: openMatch[1],
+        docId: openMatch[2]
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 从飞书文件夹 URL 提取 folder_token
+ * 支持的 URL 格式:
+ * - https://feishu.cn/drive/folder/fldcnSxxxxxxxxxxxxxx
+ * - https://xxx.feishu.cn/drive/folder/fldcnSxxxxxxxxxxxxxx
+ */
+export function parseFeishuFolderUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url)
+    const pathname = urlObj.pathname
+
+    // Match folder format: /drive/folder/{folderToken}
+    const folderMatch = pathname.match(/\/drive\/folder\/([A-Za-z0-9]+)/)
+    if (folderMatch) {
+      return folderMatch[1]
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 检查 URL 是否为飞书文档链接
+ */
+export function isFeishuDocUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.endsWith("feishu.cn") &&
+           (urlObj.pathname.includes("/docx/") || urlObj.pathname.includes("/wiki/"))
+  } catch {
+    return false
+  }
+}

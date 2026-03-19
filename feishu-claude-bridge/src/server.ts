@@ -119,6 +119,13 @@ export class Server {
       // Initialize all enabled platforms
       const adapters = await registry.initializeFromConfig(this.config.platforms)
 
+      // Pass FeishuApiClient to ClaudeClient if Feishu is enabled
+      const feishuAdapter = adapters.find((a) => a instanceof FeishuAdapter) as FeishuAdapter | undefined
+      if (feishuAdapter) {
+        this.claudeClient.setFeishuApiClient(feishuAdapter.getApiClient())
+        logger.info("FeishuApiClient passed to ClaudeClient for document access")
+      }
+
       // Register webhook routes for platforms that use webhook mode
       for (const adapter of adapters) {
         // Check if this is Feishu adapter in long-connection mode
