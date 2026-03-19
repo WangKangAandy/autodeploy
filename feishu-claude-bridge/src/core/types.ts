@@ -87,6 +87,8 @@ export interface SendOptions {
   mentions?: string[]
   /** Card content for interactive messages */
   card?: CardContent
+  /** Platform-specific raw data (e.g., sessionWebhook for DingTalk Stream mode) */
+  raw?: Record<string, unknown>
 }
 
 /** Message result after sending */

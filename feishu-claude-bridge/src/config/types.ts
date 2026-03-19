@@ -82,6 +82,13 @@ export interface FeishuPlatformConfig extends PlatformConfig {
 }
 
 /**
+ * DingTalk connection mode
+ * - webhook: Receive events via HTTP webhook (requires public domain)
+ * - stream: Receive events via WebSocket Stream mode (no public domain needed)
+ */
+export type DingTalkConnectionMode = "webhook" | "stream"
+
+/**
  * DingTalk-specific platform configuration
  */
 export interface DingTalkPlatformConfig extends PlatformConfig {
@@ -89,7 +96,10 @@ export interface DingTalkPlatformConfig extends PlatformConfig {
   appKey: string
   appSecret: string
   agentId: string
-  encodingAESKey: string
+  /** Connection mode: webhook or stream */
+  connectionMode?: DingTalkConnectionMode
+  /** Required for webhook mode only */
+  encodingAESKey?: string
 }
 
 /**

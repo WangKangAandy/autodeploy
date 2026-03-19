@@ -138,3 +138,56 @@ export interface DingTalkWebhookHeaders {
   "timestamp": string
   "sign": string
 }
+
+/**
+ * Extended message types for DingTalk Stream mode
+ */
+export type DingTalkStreamMessageType =
+  | "text"
+  | "interactiveCard"
+  | "richText"
+  | "picture"
+  | "file"
+  | "audio"
+  | "video"
+  | string
+
+/**
+ * Extended RobotMessage type for Stream mode
+ * Supports additional message types not in the official SDK types
+ */
+export interface ExtendedRobotMessage {
+  conversationId: string
+  chatbotCorpId: string
+  chatbotUserId: string
+  msgId: string
+  senderNick: string
+  isAdmin: boolean
+  senderStaffId: string
+  sessionWebhookExpiredTime: number
+  createAt: number
+  senderCorpId: string
+  conversationType: "1" | "2"
+  senderId: string
+  sessionWebhook: string
+  robotCode: string
+  msgtype: DingTalkStreamMessageType
+
+  // Text message content
+  text?: {
+    content: string
+  }
+
+  // Interactive card content (document links, etc.)
+  content?: {
+    biz_custom_action_url?: string
+    downloadURL?: string
+    picURL?: string
+    richText?: string
+    fileName?: string
+    [key: string]: unknown
+  }
+
+  // Additional fields
+  [key: string]: unknown
+}

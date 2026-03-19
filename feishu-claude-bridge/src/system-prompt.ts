@@ -34,6 +34,19 @@ export function generateSystemPrompt(): string {
 3. **get_gpu_status** - 获取远程 GPU 状态
    - 用于：快速查看 GPU 信息和驱动版本
 
+4. **fetch_doc** - 读取文档内容
+   - 用于：读取用户发送的文档链接内容
+   - 支持：飞书文档（docx/wiki）和钉钉文档（alidocs.dingtalk.com）
+   - 参数：url（文档链接）
+
+5. **create_doc** - 创建飞书文档
+   - 用于：创建新文档并返回链接
+   - 参数：title（标题）、folder_url（可选，目标文件夹）
+
+6. **update_doc** - 更新飞书文档
+   - 用于：向文档追加内容
+   - 参数：doc_id（文档ID）、content（内容）
+
 ## 可用技能 (Skills)
 
 你掌握以下专业技能，可在用户需要时主动推荐或执行：

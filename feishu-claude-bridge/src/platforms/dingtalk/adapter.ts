@@ -6,14 +6,21 @@ import type {
 import { BaseAdapter } from "../base.js"
 import { DingTalkApiClient } from "./api.js"
 import { DingTalkWebhook } from "./webhook.js"
+import { DingTalkLongConnection } from "./long-connection.js"
 import { DingTalkFormatter } from "./formatter.js"
 import type { DingTalkMessageEvent } from "./types.js"
 import { messageBus } from "../../core/message-bus.js"
+
+/** Connection mode for DingTalk */
+export type DingTalkConnectionMode = "webhook" | "stream"
 
 /**
  * DingTalk (钉钉) Platform Adapter
  *
  * Implements the PlatformAdapter interface for DingTalk platform.
+ * Supports two connection modes:
+ * - webhook: Receive events via HTTP webhook (requires public domain)
+ * - stream: Receive events via WebSocket Stream mode (no public domain needed)
  */
 export class DingTalkAdapter extends BaseAdapter {
   readonly id = "dingtalk"
@@ -21,8 +28,10 @@ export class DingTalkAdapter extends BaseAdapter {
 
   private apiClient!: DingTalkApiClient
   private webhook!: DingTalkWebhook
+  private longConnection!: DingTalkLongConnection
   private formatter: DingTalkFormatter
   private appKey: string = ""
+  private connectionMode: DingTalkConnectionMode = "webhook"
 
   constructor() {
     super()
@@ -36,33 +45,54 @@ export class DingTalkAdapter extends BaseAdapter {
     const appKey = this.requireConfig<string>("appKey")
     const appSecret = this.requireConfig<string>("appSecret")
     const agentId = this.requireConfig<string>("agentId")
-    const encodingAESKey = this.requireConfig<string>("encodingAESKey")
 
     this.appKey = appKey
 
-    // Initialize API client
+    // Get connection mode from config
+    const mode = this.getConfig<string>("connectionMode", "webhook")
+    this.connectionMode = mode as DingTalkConnectionMode
+
+    // Initialize API client (used for both modes)
     this.apiClient = new DingTalkApiClient(appKey, appSecret, agentId)
 
-    // Initialize webhook handler
+    // Initialize webhook handler (for webhook mode)
+    const encodingAESKey = this.getConfig<string>("encodingAESKey", "")
     this.webhook = new DingTalkWebhook(appKey, appSecret, encodingAESKey)
+
+    // Initialize long connection client (for stream mode)
+    this.longConnection = new DingTalkLongConnection(appKey, appSecret)
 
     // Set bot info
     this.botInfo = { id: agentId, name: "Claude Bot" }
+
+    // Start long connection if mode is stream
+    if (this.connectionMode === "stream") {
+      this.log("Starting in stream mode")
+      await this.longConnection.start()
+    } else {
+      this.log("Starting in webhook mode")
+    }
 
     this.log(`Adapter initialized with agentId: ${agentId}`)
   }
 
   /**
-   * Webhook route path
+   * Webhook route path (only used in webhook mode)
    */
   getWebhookPath(): string {
     return "dingtalk"
   }
 
   /**
-   * Handle incoming webhook request
+   * Handle incoming webhook request (only used in webhook mode)
    */
   async handleWebhook(req: Request, res: Response): Promise<void> {
+    // In stream mode, webhook is not used
+    if (this.connectionMode === "stream") {
+      res.status(400).json({ error: "Webhook not available in stream mode" })
+      return
+    }
+
     try {
       // Handle URL verification
       if (this.webhook.handleUrlVerification(req, res)) {
@@ -96,7 +126,7 @@ export class DingTalkAdapter extends BaseAdapter {
   }
 
   /**
-   * Process a message event
+   * Process a message event (webhook mode)
    */
   private async processMessageEvent(event: DingTalkMessageEvent): Promise<void> {
     const unifiedMessage = this.formatter.parseToUnified(event)
@@ -132,6 +162,17 @@ export class DingTalkAdapter extends BaseAdapter {
     options?: SendOptions
   ): Promise<MessageResult> {
     try {
+      // In stream mode, prefer using session webhook if available
+      const sessionWebhook = options?.raw?.sessionWebhook as string | undefined
+      const originalMessageId = options?.raw?.messageId as string | undefined
+      if (this.connectionMode === "stream" && sessionWebhook) {
+        return this.longConnection.sendMessage(targetId, content, {
+          ...options,
+          sessionWebhook,
+          messageId: originalMessageId,
+        })
+      }
+
       const formatted = this.formatter.formatForSend(content, options)
 
       // Determine if sending to group or private
@@ -166,5 +207,36 @@ export class DingTalkAdapter extends BaseAdapter {
    */
   getFormatter(): DingTalkFormatter {
     return this.formatter
+  }
+
+  /**
+   * Get current connection mode
+   */
+  getConnectionMode(): DingTalkConnectionMode {
+    return this.connectionMode
+  }
+
+  /**
+   * Check if long connection is active
+   */
+  isLongConnectionActive(): boolean {
+    return this.longConnection?.isActive() || false
+  }
+
+  /**
+   * Get the DingTalk API client
+   */
+  getApiClient(): DingTalkApiClient {
+    return this.apiClient
+  }
+
+  /**
+   * Dispose resources
+   */
+  async dispose(): Promise<void> {
+    if (this.longConnection) {
+      this.longConnection.stop()
+    }
+    this.log("Disposed")
   }
 }

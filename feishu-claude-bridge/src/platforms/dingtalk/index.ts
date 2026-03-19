@@ -17,5 +17,6 @@ registry.register("dingtalk", DingTalkAdapterConstructor)
 export { DingTalkAdapter } from "./adapter.js"
 export { DingTalkApiClient } from "./api.js"
 export { DingTalkWebhook } from "./webhook.js"
+export { DingTalkLongConnection } from "./long-connection.js"
 export { DingTalkFormatter } from "./formatter.js"
 export * from "./types.js"

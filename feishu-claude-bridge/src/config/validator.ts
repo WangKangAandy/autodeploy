@@ -88,8 +88,30 @@ function loadDingTalkConfig(): PlatformConfig | null {
   const appKey = getEnvVar("DINGTALK_APP_KEY", false)
   const appSecret = getEnvVar("DINGTALK_APP_SECRET", false)
   const agentId = getEnvVar("DINGTALK_AGENT_ID", false)
+
+  // Get connection mode, default to webhook for backward compatibility
+  // Set DINGTALK_CONNECTION_MODE=stream to use Stream mode (no public domain needed)
+  const connectionMode = getEnvVar("DINGTALK_CONNECTION_MODE", false) || "webhook"
+
+  // encodingAESKey is only required for webhook mode
   const encodingAESKey = getEnvVar("DINGTALK_ENCODING_AES_KEY", false)
 
+  // For stream mode, we only need appKey, appSecret, and agentId
+  if (connectionMode === "stream") {
+    if (!appKey || !appSecret || !agentId) {
+      return null
+    }
+    return {
+      type: "dingtalk",
+      enabled: getEnvVar("DINGTALK_ENABLED", false) !== "false",
+      appKey,
+      appSecret,
+      agentId,
+      connectionMode: "stream" as const,
+    }
+  }
+
+  // For webhook mode, encodingAESKey is required
   if (!appKey || !appSecret || !agentId || !encodingAESKey) {
     return null
   }
@@ -100,7 +122,8 @@ function loadDingTalkConfig(): PlatformConfig | null {
     appKey,
     appSecret,
     agentId,
-    encodingAESKey
+    connectionMode: "webhook" as const,
+    encodingAESKey,
   }
 }
 

@@ -10,8 +10,9 @@ import { logger } from "./utils/logger.js"
 // Import all platform adapters (auto-registers them)
 import "./platforms/index.js"
 
-// Import FeishuAdapter type to check connection mode
+// Import adapter types to check connection mode
 import { FeishuAdapter } from "./platforms/feishu/index.js"
+import { DingTalkAdapter } from "./platforms/dingtalk/index.js"
 
 /**
  * Multi-Platform Bot Server
@@ -124,6 +125,13 @@ export class Server {
       if (feishuAdapter) {
         this.claudeClient.setFeishuApiClient(feishuAdapter.getApiClient())
         logger.info("FeishuApiClient passed to ClaudeClient for document access")
+      }
+
+      // Pass DingTalkApiClient to ClaudeClient if DingTalk is enabled
+      const dingtalkAdapter = adapters.find((a) => a instanceof DingTalkAdapter) as DingTalkAdapter | undefined
+      if (dingtalkAdapter) {
+        this.claudeClient.setDingTalkApiClient(dingtalkAdapter.getApiClient())
+        logger.info("DingTalkApiClient passed to ClaudeClient for document access")
       }
 
       // Register webhook routes for platforms that use webhook mode

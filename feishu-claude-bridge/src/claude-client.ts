@@ -4,7 +4,8 @@ import { ToolClient, type ToolClientConfig } from "./tool-client.js"
 import { generateSystemPrompt, getContextAwarePrompt } from "./system-prompt.js"
 import { parseCredentials } from "./credential-parser.js"
 import { FeishuApiClient } from "./platforms/feishu/api.js"
-import { parseFeishuDocUrl, parseFeishuFolderUrl } from "./utils/helpers.js"
+import { DingTalkApiClient } from "./platforms/dingtalk/api.js"
+import { parseFeishuDocUrl, parseFeishuFolderUrl, parseDingTalkDocUrl, detectDocPlatform } from "./utils/helpers.js"
 
 export interface ClaudeClientConfig {
   apiKey: string
@@ -13,6 +14,7 @@ export interface ClaudeClientConfig {
   systemPrompt?: string
   toolClient?: ToolClient
   feishuApiClient?: FeishuApiClient
+  dingtalkApiClient?: DingTalkApiClient
 }
 
 // Tool definitions for Claude API with dynamic credentials support
@@ -137,14 +139,15 @@ const TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: "fetch_doc",
     description:
-      "根据飞书文档链接获取文档内容。当用户发送飞书文档链接时使用此工具读取文档内容。" +
-      "支持 docx 和 wiki 类型的文档链接。",
+      "根据文档链接获取文档内容。支持飞书文档和钉钉文档。" +
+      "飞书文档支持 docx 和 wiki 类型，钉钉文档支持 alidocs.dingtalk.com 链接。" +
+      "当用户发送文档链接时使用此工具读取文档内容。",
     input_schema: {
       type: "object",
       properties: {
         url: {
           type: "string",
-          description: "飞书文档链接，如 https://feishu.cn/docx/DoxdSxxxxxxxxxx",
+          description: "文档链接，如 https://feishu.cn/docx/DoxdSxxxxxxxxxx 或 https://alidocs.dingtalk.com/i/nodes/xxxxxx",
         },
       },
       required: ["url"],
@@ -202,6 +205,7 @@ export class ClaudeClient {
   private systemPrompt: string
   private defaultToolClient: ToolClient | undefined
   private feishuApiClient: FeishuApiClient | undefined
+  private dingtalkApiClient: DingTalkApiClient | undefined
   private conversationHistory: Map<string, Anthropic.Messages.MessageParam[]> = new Map()
   // Store dynamic credentials per user session
   private userCredentials: Map<string, ToolClientConfig> = new Map()
@@ -218,6 +222,7 @@ export class ClaudeClient {
 
     this.defaultToolClient = config.toolClient
     this.feishuApiClient = config.feishuApiClient
+    this.dingtalkApiClient = config.dingtalkApiClient
 
     logger.info(`Claude client initialized with model: ${this.model}, tools: enabled`)
   }
@@ -435,23 +440,53 @@ export class ClaudeClient {
    * Execute fetch_doc tool
    */
   private async executeFetchDoc(url: string): Promise<string> {
-    if (!this.feishuApiClient) {
-      return "Error: Feishu API client not configured. Document access requires Feishu app credentials."
+    const platform = detectDocPlatform(url)
+
+    if (platform === "dingtalk") {
+      // Handle DingTalk document
+      if (!this.dingtalkApiClient) {
+        return "Error: DingTalk API client not configured. Document access requires DingTalk app credentials."
+      }
+
+      const docInfo = parseDingTalkDocUrl(url)
+      if (!docInfo) {
+        return `Error: Invalid DingTalk document URL. Expected format: https://alidocs.dingtalk.com/i/nodes/{docId}`
+      }
+
+      logger.info(`Fetching DingTalk document: ${docInfo.docId}`)
+
+      const result = await this.dingtalkApiClient.fetchDocument(docInfo.docId)
+      if (!result.success) {
+        return `Error fetching DingTalk document: ${result.error}`
+      }
+
+      return `**文档标题**: ${result.title}\n\n**文档内容**:\n${result.content}`
     }
 
-    const docInfo = parseFeishuDocUrl(url)
-    if (!docInfo) {
-      return `Error: Invalid Feishu document URL. Expected format: https://feishu.cn/docx/{docId} or https://feishu.cn/wiki/{docId}`
+    if (platform === "feishu") {
+      // Handle Feishu document
+      if (!this.feishuApiClient) {
+        return "Error: Feishu API client not configured. Document access requires Feishu app credentials."
+      }
+
+      const docInfo = parseFeishuDocUrl(url)
+      if (!docInfo) {
+        return `Error: Invalid Feishu document URL. Expected format: https://feishu.cn/docx/{docId} or https://feishu.cn/wiki/{docId}`
+      }
+
+      logger.info(`Fetching Feishu document: ${docInfo.docId} (type: ${docInfo.docType})`)
+
+      const result = await this.feishuApiClient.fetchDocument(docInfo.docId)
+      if (!result.success) {
+        return `Error fetching Feishu document: ${result.error}`
+      }
+
+      return `**文档标题**: ${result.title}\n\n**文档内容**:\n${result.content}`
     }
 
-    logger.info(`Fetching document: ${docInfo.docId} (type: ${docInfo.docType})`)
-
-    const result = await this.feishuApiClient.fetchDocument(docInfo.docId)
-    if (!result.success) {
-      return `Error fetching document: ${result.error}`
-    }
-
-    return `**文档标题**: ${result.title}\n\n**文档内容**:\n${result.content}`
+    return `Error: Unsupported document URL. Supported platforms:
+- Feishu: https://feishu.cn/docx/{docId} or https://feishu.cn/wiki/{docId}
+- DingTalk: https://alidocs.dingtalk.com/i/nodes/{docId}`
   }
 
   /**
@@ -521,6 +556,14 @@ export class ClaudeClient {
   setFeishuApiClient(client: FeishuApiClient): void {
     this.feishuApiClient = client
     logger.info("Feishu API client configured for document access")
+  }
+
+  /**
+   * Set the DingTalk API client (called after platform adapters are initialized)
+   */
+  setDingTalkApiClient(client: DingTalkApiClient): void {
+    this.dingtalkApiClient = client
+    logger.info("DingTalk API client configured for document access")
   }
 
   /**

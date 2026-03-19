@@ -65,7 +65,8 @@ export class UnifiedMessageHandler {
 
       // Send response back through the platform
       const sendOptions: SendOptions = {
-        type: "text"
+        type: "text",
+        raw: message.raw as Record<string, unknown>,
       }
 
       // For group chats, mention the sender
@@ -90,7 +91,10 @@ export class UnifiedMessageHandler {
           await adapter.sendMessage(
             message.chat.type === "private" ? userId : chatId,
             "抱歉，处理您的消息时出错了。请稍后再试。",
-            { type: "text" }
+            {
+              type: "text",
+              raw: message.raw as Record<string, unknown>,
+            }
           )
         }
       } catch (sendError) {
@@ -114,7 +118,10 @@ export class UnifiedMessageHandler {
         ? message.sender.id
         : message.chat.id
 
-      await adapter.sendMessage(targetId, ackMessage, { type: "text" })
+      await adapter.sendMessage(targetId, ackMessage, {
+        type: "text",
+        raw: message.raw as Record<string, unknown>,
+      })
     } catch (error) {
       logger.error(`Failed to send acknowledgment: ${error}`)
     }

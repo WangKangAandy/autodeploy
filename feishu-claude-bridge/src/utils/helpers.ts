@@ -258,3 +258,49 @@ export function isFeishuDocUrl(url: string): boolean {
     return false
   }
 }
+
+/**
+ * 从钉钉文档 URL 提取文档 ID
+ * 支持的 URL 格式:
+ * - https://alidocs.dingtalk.com/i/nodes/{docId}?...
+ */
+export function parseDingTalkDocUrl(url: string): { docId: string } | null {
+  try {
+    const urlObj = new URL(url)
+    const pathname = urlObj.pathname
+
+    // Match alidocs.dingtalk.com format: /i/nodes/{docId}
+    const match = pathname.match(/\/i\/nodes\/([a-zA-Z0-9]+)/)
+    if (match) {
+      return { docId: match[1] }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 检查 URL 是否为钉钉文档链接
+ */
+export function isDingTalkDocUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname === "alidocs.dingtalk.com" &&
+           urlObj.pathname.includes("/i/nodes/")
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 检测文档 URL 类型
+ */
+export type DocPlatform = "feishu" | "dingtalk" | "unknown"
+
+export function detectDocPlatform(url: string): DocPlatform {
+  if (isFeishuDocUrl(url)) return "feishu"
+  if (isDingTalkDocUrl(url)) return "dingtalk"
+  return "unknown"
+}
