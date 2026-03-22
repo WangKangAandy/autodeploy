@@ -1,7 +1,6 @@
 import { loadConfig } from "./config/validator.js"
 import { Server } from "./server.js"
 import { ClaudeClient } from "./claude-client.js"
-import { AutoResponder } from "./auto-responder.js"
 import { logger } from "./utils/logger.js"
 
 /**
@@ -35,20 +34,6 @@ async function startServer(): Promise<Server> {
     const server = new Server(config)
     await server.start()
 
-    // Start the auto-responder for backward compatibility
-    // (Processes messages from queue files)
-    const claudeClient = server.getClaudeClient()
-    const autoResponder = new AutoResponder({
-      messageQueueDir: config.queue.messageQueueDir,
-      claudeClient,
-      checkInterval: 2000
-    })
-    autoResponder.start()
-
-    logger.info("")
-    logger.info("Auto-response is ENABLED")
-    logger.info("")
-
     return server
   } catch (error) {
     logger.error(`Failed to start application: ${error}`)
@@ -63,7 +48,7 @@ startServer().catch((error) => {
 })
 
 // Export main components
-export { startServer, Server, ClaudeClient, AutoResponder }
+export { startServer, Server, ClaudeClient }
 
 // Export core components
 export { registry } from "./core/registry.js"

@@ -91,6 +91,16 @@ export class FeishuApiClient {
   }
 
   /**
+   * Get token status (for health checks)
+   */
+  getTokenStatus(): { isValid: boolean; expiresAt: number } {
+    return {
+      isValid: !!this.appAccessToken && this.tokenExpiry > Date.now(),
+      expiresAt: this.tokenExpiry
+    }
+  }
+
+  /**
    * Get bot information
    */
   async getBotInfo(): Promise<FeishuBotInfo> {

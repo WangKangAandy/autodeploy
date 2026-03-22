@@ -1,22 +1,49 @@
-type LogLevel = "info" | "warn" | "error" | "debug"
+type LogLevel = "debug" | "info" | "warn" | "error"
 
 class Logger {
   private prefix = "[FeishuBridge]"
+  private level: LogLevel
+  private levelPriority: Record<LogLevel, number> = {
+    debug: 0,
+    info: 1,
+    warn: 2,
+    error: 3
+  }
+
+  constructor() {
+    // Read log level from environment variable, default to "info"
+    const envLevel = process.env.LOG_LEVEL as LogLevel
+    this.level = this.isValidLevel(envLevel) ? envLevel : "info"
+  }
+
+  private isValidLevel(level: string | undefined): level is LogLevel {
+    return level !== undefined && level in this.levelPriority
+  }
+
+  private shouldLog(level: LogLevel): boolean {
+    return this.levelPriority[level] >= this.levelPriority[this.level]
+  }
 
   info(message: string, ...args: unknown[]): void {
-    this.log("info", message, ...args)
+    if (this.shouldLog("info")) {
+      this.log("info", message, ...args)
+    }
   }
 
   warn(message: string, ...args: unknown[]): void {
-    this.log("warn", message, ...args)
+    if (this.shouldLog("warn")) {
+      this.log("warn", message, ...args)
+    }
   }
 
   error(message: string, ...args: unknown[]): void {
-    this.log("error", message, ...args)
+    if (this.shouldLog("error")) {
+      this.log("error", message, ...args)
+    }
   }
 
   debug(message: string, ...args: unknown[]): void {
-    if (process.env.NODE_ENV === "development") {
+    if (this.shouldLog("debug")) {
       this.log("debug", message, ...args)
     }
   }

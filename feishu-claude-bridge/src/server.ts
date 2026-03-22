@@ -46,18 +46,40 @@ export class Server {
 
     // Health check endpoint
     this.app.get("/health", (_req: Request, res: Response) => {
-      const enabledPlatforms = registry.getEnabledPlatforms()
-      const platformDetails = enabledPlatforms.map((id) => {
+      const platformDetails = []
+
+      for (const id of registry.getEnabledPlatforms()) {
         const adapter = registry.getAdapter(id)
+        const detail: Record<string, unknown> = { id, name: adapter?.name }
+
         if (adapter instanceof FeishuAdapter) {
-          return { id, name: adapter.name, mode: adapter.getConnectionMode() }
+          detail.mode = adapter.getConnectionMode()
+          detail.connectionActive = adapter.isLongConnectionActive()
+          // Add Token status
+          const tokenStatus = adapter.getApiClient().getTokenStatus()
+          detail.token = {
+            valid: tokenStatus.isValid,
+            expiresAt: new Date(tokenStatus.expiresAt).toISOString(),
+            secondsToExpiry: Math.max(0, Math.floor((tokenStatus.expiresAt - Date.now()) / 1000))
+          }
+        } else if (adapter instanceof DingTalkAdapter) {
+          detail.mode = adapter.getConnectionMode()
+          detail.connectionActive = adapter.isLongConnectionActive()
+          const tokenStatus = adapter.getApiClient().getTokenStatus()
+          detail.token = {
+            valid: tokenStatus.isValid,
+            expiresAt: new Date(tokenStatus.expiresAt).toISOString(),
+            secondsToExpiry: Math.max(0, Math.floor((tokenStatus.expiresAt - Date.now()) / 1000))
+          }
         }
-        return { id, name: adapter?.name }
-      })
+
+        platformDetails.push(detail)
+      }
 
       res.json({
         status: "ok",
         timestamp: new Date().toISOString(),
+        uptime: Math.floor(process.uptime()),
         platforms: platformDetails,
         messageQueue: messageBus.getQueueSize()
       })

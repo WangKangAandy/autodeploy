@@ -86,6 +86,16 @@ export class DingTalkApiClient {
   }
 
   /**
+   * Get token status (for health checks)
+   */
+  getTokenStatus(): { isValid: boolean; expiresAt: number } {
+    return {
+      isValid: !!this.accessToken && this.tokenExpiry > Date.now(),
+      expiresAt: this.tokenExpiry
+    }
+  }
+
+  /**
    * Send a message to a user (private chat)
    */
   async sendPrivateMessage(
