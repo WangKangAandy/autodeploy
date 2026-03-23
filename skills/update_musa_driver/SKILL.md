@@ -1,6 +1,17 @@
 ---
 name: update_musa_driver
 description: Targeted MUSA driver update or reinstall workflow. Switches drivers quickly on an existing host without rerunning the full base environment deployment.
+triggers:
+  - update driver
+  - upgrade driver
+  - downgrade driver
+  - reinstall driver
+  - switch driver version
+  - 更新驱动
+  - 升级驱动
+  - 降级驱动
+  - 重装驱动
+  - 切换驱动版本
 ---
 
 # Update MUSA Driver
@@ -25,6 +36,8 @@ Use it when the user asks to upgrade, downgrade, reinstall, or quickly switch th
 
 - Full environment workflow: `skills/deploy_musa_base_env/SKILL.md`
 - SDK/driver compatibility mapping: `skills/deploy_musa_base_env/config/sdk_compatibility.yml`
+- MOSS download and MinIO Client setup: `references/moss-download-guide.md`
+- Driver installation reference: `references/driver-install-guide.md`
 - Shared container validation troubleshooting: `references/container-validation-runbook.md`
 - Remote command routing: `references/remote-execution-policy.md`
 
@@ -49,25 +62,71 @@ Collect only the minimum required values.
 - If no mapping matches, ask the user for the exact driver version instead of guessing.
 - If optional container validation is requested and `DOCKER_IMAGE` is not provided, resolve it from the matching `supported_images` entry in `skills/deploy_musa_base_env/config/sdk_compatibility.yml`.
 
-Example lookup flow for `MUSA_SDK_VERSION` without a direct driver version:
+### SDK → Driver Lookup
+
+The YAML structure uses `compatibility` array and `metadata` block. Example lookup:
 
 ```bash
 MT_GPU_DRIVER_VERSION=$(python3 - <<'PY'
 import yaml
 
 with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encoding="utf-8") as f:
-    data = yaml.safe_load(f) or []
+    data = yaml.safe_load(f)
 
+entries = data.get("compatibility", [])
 sdk_version = "4.3.1"
 gpu_type = "S4000"
 gpu_arch = "QY2"
 
-for item in data:
-    if item.get("sdk_version") == sdk_version and item.get("gpu_type") == gpu_type and item.get("gpu_arch") == gpu_arch:
+for item in entries:
+    if (item.get("sdk_version") == sdk_version and
+        item.get("gpu_type") == gpu_type and
+        item.get("gpu_arch") == gpu_arch):
         print(item["driver_version"])
         break
 PY
 )
+```
+
+### Driver → SDK Lookup (Reverse)
+
+To find the SDK version for a given driver:
+
+```bash
+MUSA_SDK_VERSION=$(python3 - <<'PY'
+import yaml
+
+with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f)
+
+entries = data.get("compatibility", [])
+driver_version = "3.3.1-server"
+
+for item in entries:
+    if item.get("driver_version") == driver_version:
+        print(item["sdk_version"])
+        break
+PY
+)
+```
+
+### Download Path Construction
+
+Use the `metadata.driver_path_template` to construct download URLs:
+
+```bash
+DOWNLOAD_PATH=$(python3 - <<'PY'
+import yaml
+
+with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f)
+
+template = data["metadata"]["driver_path_template"]
+path = template.format(sdk_version="4.3.1", driver_version="3.3.1-server")
+print(path)
+PY
+)
+# Output: sh-moss/sw-release/musa/external/4.3.1/deb/musa_3.3.1-server_amd64.deb
 ```
 
 If the runtime does not have PyYAML available, use a small repo-local helper or ask the user for the target driver version instead of inventing one.
@@ -77,7 +136,7 @@ If the runtime does not have PyYAML available, use a small repo-local helper or 
 - Ubuntu or another compatible Linux distribution
 - Sudo privileges
 - `jq` available for state handling
-- `mc` only if the package must be downloaded from MOSS
+- `mc` only if the package must be downloaded from MOSS (see `references/moss-download-guide.md` for setup)
 
 ## Sudo Password Handling
 
@@ -155,6 +214,8 @@ fi
 Save state: `initialized`
 
 ### Step 3: Prepare Driver Package
+
+For MinIO Client setup and MOSS configuration, see `references/moss-download-guide.md`.
 
 Prefer existing local packages before downloading.
 Check common local naming variants first, because some environments keep the package as `musa_<version>-server_amd64.deb` while others may use `musa_<version>_amd64.deb`.

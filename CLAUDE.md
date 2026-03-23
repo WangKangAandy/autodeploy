@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Available Skills
+
+This repository contains executable automation skills. Match user requests to skills by trigger patterns.
+
+| Skill | Description | Triggers |
+|-------|-------------|----------|
+| `deploy_musa_base_env` | Complete MUSA environment deployment | "部署 MUSA 环境", "install MUSA SDK", "full MUSA setup" |
+| `update_musa_driver` | Driver-only update or reinstall | "更新驱动", "upgrade driver", "reinstall driver", "配置 GPU 驱动" |
+
+**Skill Index:** `skills/index.yml` provides machine-readable skill definitions with inputs, outputs, and trigger patterns.
+
+**Reference Documents:** `references/` contains non-executable knowledge resources (MOSS download guide, driver install guide, validation runbook, execution policy).
+
 ## Overview
 
 This is an automation workspace for MUSA SDK environment setup, remote MT-GPU execution, and deployment documentation. The repository packages:
@@ -23,6 +36,8 @@ This is an automation workspace for MUSA SDK environment setup, remote MT-GPU ex
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK, driver, GPU, and image compatibility mapping |
 | `references/remote-execution-policy.md` | Source of truth for local vs remote command routing |
 | `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
+| `references/moss-download-guide.md` | MOSS download and MinIO Client setup guide |
+| `references/driver-install-guide.md` | Shared driver installation reference |
 
 ## Local Build Commands
 
