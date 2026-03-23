@@ -1,0 +1,10 @@
+{
+  "id": "openclaw-musa",
+  "name": "MUSA Deployment",
+  "description": "MUSA SDK environment deployment and GPU driver management",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}

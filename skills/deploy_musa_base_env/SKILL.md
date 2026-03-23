@@ -12,7 +12,30 @@ triggers:
 
 # MUSA Full Environment Deployment
 
-This skill performs a complete MUSA SDK deployment on a bare-metal host, following the sequence: system dependencies → GPU driver → container toolkit → Docker image → container environment validation. It supports both local execution and remote deployment via the remote execution tools.
+This skill performs a complete MUSA SDK deployment on a bare-metal host, following the sequence: system dependencies → GPU driver → container toolkit → Docker image → container environment validation. It supports both local execution and remote deployment modes.
+
+## Deployment Mode Selection
+
+**IMPORTANT: Before starting deployment, ask the user:**
+
+1. **Local deployment**: Deploy on the current machine
+2. **Remote deployment**: Deploy on a remote MT-GPU machine via SSH
+
+If remote deployment is selected, collect:
+- Host IP address
+- SSH username
+- SSH password
+- SSH port (default: 22)
+
+Then use the `musa_set_mode` tool to configure the deployment mode:
+
+```
+# For local deployment:
+musa_set_mode(mode="local")
+
+# For remote deployment:
+musa_set_mode(mode="remote", host="192.168.1.100", user="gpuuser", password="xxx", port=22)
+```
 
 ## Source Of Truth
 
@@ -362,17 +385,18 @@ echo "========================================="
 
 ## Remote Deployment Support
 
-This skill can be executed remotely using the OpenCode remote execution tools:
+This skill can be executed remotely using the MUSA deployment tools:
 
-- Use `remote-exec` for host-level commands (driver installation, package management)
-- Use `remote-docker` for container operations (image pull, container validation)
-- Use `remote-sync` to transfer downloaded packages to remote host
+- Use `musa_exec` for host-level commands (driver installation, package management)
+- Use `musa_docker` for container operations (image pull, container validation)
+- Use `musa_sync` to transfer downloaded packages to remote host
 
 Example remote workflow:
-1. Collect version information locally
-2. Sync skill scripts to remote host
-3. Execute deployment steps via remote tools
-4. Pull verification results back to local machine
+1. Call `musa_set_mode` with remote connection details
+2. Collect version information locally
+3. Sync skill scripts to remote host
+4. Execute deployment steps via MUSA tools
+5. Pull verification results back to local machine
 
 ## Troubleshooting
 

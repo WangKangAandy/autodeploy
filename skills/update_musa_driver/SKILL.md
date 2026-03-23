@@ -19,6 +19,29 @@ triggers:
 This skill is for driver-only operations on a host that already has a usable MUSA environment or partial deployment.
 Use it when the user asks to upgrade, downgrade, reinstall, or quickly switch the MUSA driver without rerunning the full base environment flow.
 
+## Deployment Mode Selection
+
+**IMPORTANT: Before starting, ask the user:**
+
+1. **Local operation**: Update driver on the current machine
+2. **Remote operation**: Update driver on a remote MT-GPU machine via SSH
+
+If remote operation is selected, collect:
+- Host IP address
+- SSH username
+- SSH password
+- SSH port (default: 22)
+
+Then use the `musa_set_mode` tool to configure the deployment mode:
+
+```
+# For local operation:
+musa_set_mode(mode="local")
+
+# For remote operation:
+musa_set_mode(mode="remote", host="192.168.1.100", user="gpuuser", password="xxx", port=22)
+```
+
 ## When To Use This Skill
 
 - Update only the host driver package
@@ -369,9 +392,9 @@ Save state: `completed`
 
 ## Remote Support
 
-When running on the Remote MT-GPU Machine:
+When running on a remote MT-GPU Machine:
 
-- Use `remote-exec` for host checks, package installation, driver removal, module reload, and validation
+- Use `musa_exec` for host checks, package installation, driver removal, module reload, and validation
 - Do not replace remote host operations with local Bash commands
 - Keep driver package paths aligned with the repo's remote path conventions if packages are uploaded first
 
