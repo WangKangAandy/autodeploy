@@ -1,7 +1,26 @@
+# Deployment state files
 .musa_deployment_state.json
 .musa_sdk_install_state.json
 .musa_driver_update_state.json
 musa_packages/
+
+# OpenCode
 .opencode/node_modules/
 .opencode/remote-ssh.env
 .opencode/remote-exec.log
+
+# Agent Tools
+agent-tools/node_modules/
+agent-tools/config/remote-ssh.env
+agent-tools/dist/
+
+# Feishu Bridge
+feishu-claude-bridge/node_modules/
+feishu-claude-bridge/dist/
+feishu-claude-bridge/config/.env
+feishu-claude-bridge/messages/
+feishu-claude-bridge/responses/
+
+# Root
+package-lock.json
+node_modules/

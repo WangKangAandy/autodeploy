@@ -1,0 +1,79 @@
+# Skills Index
+# This file provides a machine-readable index of all available skills in this repository.
+# Agents can use this to discover and match user intents to appropriate skills.
+
+skills:
+  - id: deploy_musa_base_env
+    name: deploy_musa_base_env
+    path: deploy_musa_base_env/SKILL.md
+    description: Complete MUSA environment deployment from dependencies to container validation
+    category: deployment
+    triggers:
+      - deploy MUSA environment
+      - install MUSA SDK
+      - full MUSA setup
+      - 部署 MUSA 环境
+      - 安装 MUSA SDK
+      - 完整环境部署
+    inputs:
+      required:
+        - MUSA_SDK_VERSION
+        - MT_GPU_DRIVER_VERSION
+      optional:
+        - MT_GPU_TYPE
+        - MT_GPU_ARCH
+        - DOCKER_IMAGE
+    outputs:
+      - state file: .musa_deployment_state.json
+      - driver installed and loaded
+      - container toolkit bound to Docker
+      - validation container running
+
+  - id: update_musa_driver
+    name: update_musa_driver
+    path: update_musa_driver/SKILL.md
+    description: Targeted MUSA driver update or reinstall without full environment deployment
+    category: maintenance
+    triggers:
+      - update driver
+      - upgrade driver
+      - downgrade driver
+      - reinstall driver
+      - switch driver version
+      - 更新驱动
+      - 升级驱动
+      - 降级驱动
+      - 重装驱动
+      - 切换驱动版本
+    inputs:
+      required:
+        - MT_GPU_DRIVER_VERSION
+      optional:
+        - MUSA_SDK_VERSION
+        - DRIVER_PACKAGE_PATH
+        - DOCKER_IMAGE
+    outputs:
+      - state file: .musa_driver_update_state.json
+      - new driver installed and loaded
+
+# Reference documents (not executable skills, but important for agent context)
+references:
+  - path: ../references/moss-download-guide.md
+    description: MOSS download and MinIO Client setup guide
+
+  - path: ../references/driver-install-guide.md
+    description: Shared driver installation reference for download, install, and troubleshooting
+
+  - path: ../references/container-validation-runbook.md
+    description: Troubleshooting runbook for container validation failures
+
+  - path: ../references/remote-execution-policy.md
+    description: Source of truth for local vs remote command routing
+
+# Configuration files
+configs:
+  - path: deploy_musa_base_env/config/sdk_compatibility.yml
+    description: SDK, driver, GPU, and image compatibility mapping
+
+  - path: deploy_musa_base_env/config/container_toolkit.yml
+    description: Container toolkit version and download URLs

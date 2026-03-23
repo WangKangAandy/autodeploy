@@ -1,11 +1,26 @@
 ---
-name: deploy_musa_full_env
+name: deploy_musa_base_env
 description: Complete MUSA environment deployment from dependencies to container validation. Handles system dependencies, driver installation, container toolkit setup, Docker image pull, and final container verification.
+triggers:
+  - deploy MUSA environment
+  - install MUSA SDK
+  - full MUSA setup
+  - 部署 MUSA 环境
+  - 安装 MUSA SDK
+  - 完整环境部署
 ---
 
 # MUSA Full Environment Deployment
 
 This skill performs a complete MUSA SDK deployment on a bare-metal host, following the sequence: system dependencies → GPU driver → container toolkit → Docker image → container environment validation. It supports both local execution and remote deployment via the remote execution tools.
+
+## Source Of Truth
+
+- SDK/driver compatibility mapping: `skills/deploy_musa_base_env/config/sdk_compatibility.yml`
+- MOSS download and MinIO Client setup: `references/moss-download-guide.md`
+- Driver installation reference: `references/driver-install-guide.md`
+- Container validation troubleshooting: `references/container-validation-runbook.md`
+- Remote command routing: `references/remote-execution-policy.md`
 
 ## Prerequisites
 
@@ -23,27 +38,9 @@ Check and install required tools at the very start:
 | `wget` | Download packages | `sudo apt install -y wget` |
 | `curl` | HTTP client | `sudo apt install -y curl` |
 | `jq` | JSON processor | `sudo apt install -y jq` |
-| `mc` | MinIO Client for MOSS downloads | `curl -O https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x mc && sudo mv mc /usr/local/bin/` |
+| `mc` | MinIO Client for MOSS downloads | See `references/moss-download-guide.md` |
 
-**Important Note about `mc` command**: The `mc` command could refer to two different tools:
-1. **MinIO Client** (required): Object storage client for downloading MUSA packages from MOSS
-2. **Midnight Commander** (file manager): A graphical file manager that may be installed on some systems
-
-**To verify you have the correct `mc` (MinIO Client):**
-```bash
-# Check which mc is installed
-which mc
-mc --version
-
-# MinIO Client should show version like:
-# mc version RELEASE.2025-XX-XXTXX-XX-XXZ
-# Midnight Commander would show different output
-
-# If Midnight Commander is installed, you can:
-# 1. Use full path to MinIO Client: /usr/local/bin/mc
-# 2. Or install MinIO Client with a different name:
-#    curl -O https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x mc && sudo mv mc /usr/local/bin/minio-client
-```
+For MinIO Client setup and MOSS configuration details, see `references/moss-download-guide.md`.
 
 
 
@@ -157,10 +154,11 @@ fi
 ```
 
 #### 2.2 Download Driver Package
+
+For MinIO Client setup and MOSS configuration, see `references/moss-download-guide.md`.
+
 ```bash
 # Set up MinIO client for MOSS access
-# Ensure 'mc' refers to MinIO Client, not Midnight Commander (file manager)
-# Verify with: mc --version (should show MinIO Client version)
 mc alias set sh-moss https://sh-moss.mthreads.com sw-guest-mt-sw sw-guest123
 
 # Download driver package
