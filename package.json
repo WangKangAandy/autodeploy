@@ -19,7 +19,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "ssh2": "^1.15.0"
+    "ssh2": "^1.17.0"
   },
   "peerDependencies": {
     "openclaw": ">=1.0.0"
@@ -29,6 +29,8 @@
     "url": "git+https://github.com/WangKangAandy/autodeploy.git"
   },
   "openclaw": {
-    "extensions": ["./index.js"]
+    "extensions": [
+      "./index.js"
+    ]
   }
 }
