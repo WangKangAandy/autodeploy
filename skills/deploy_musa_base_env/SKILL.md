@@ -508,8 +508,15 @@ echo "  Host driver: mthreads-gmi"
 echo "  Container GPU: docker run --rm --env MTHREADS_VISIBLE_DEVICES=all registry.mthreads.com/cloud-mirror/ubuntu:20.04 mthreads-gmi"
 echo "  MUSA tools: musaInfo, musa_version_query"
 echo "  PyTorch MUSA: python -c \"import torch; print(torch.musa.is_available()); print(torch.tensor(1, device='musa') + 1)\""
+echo ""
+echo "【后续步骤】"
+echo "基础环境已就绪。如需继续部署应用层："
+echo "  - 提供操作文档，我将执行文档中的应用层步骤"
+echo "  - 或直接告诉我要执行的命令（模型下载、推理服务等）"
 echo "========================================="
 ```
+
+**注意**: 此 skill 只负责基础环境部署。应用层操作（模型下载、推理/训练命令、性能测试）应通过文档驱动执行。
 
 ## Important Rules
 

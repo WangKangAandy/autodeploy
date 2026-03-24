@@ -247,12 +247,48 @@ Based on checked-in TypeScript files:
 
 ## Operational Constraints
 
+- **Do NOT auto-commit changes** — Only commit when user explicitly requests it (e.g., "commit this", "提交修改"). Never commit automatically after making edits.
 - Never auto-run `sudo reboot`
 - After driver installation, prefer documented manual reload: `modprobe -rv mtgpu && modprobe mtgpu` or `sudo modprobe mtgpu`
 - Ask for manual reboot only if documented reload path fails
 - Do not use sudo credentials for `git` operations or `docker pull`
 - Verify `mc` means MinIO Client, not Midnight Commander, before MOSS download steps
 - Prefer targeted verification after each install step instead of batching commands
+
+## 文档驱动执行
+
+当用户提供飞书/钉钉文档链接并要求部署时，将文档视为"执行计划"：
+
+### 执行流程
+
+1. **获取文档内容** — 通过飞书/钉钉插件获取文档全文
+2. **解析文档结构** — 识别以下部分：
+   - 环境依赖（驱动版本、镜像名称）
+   - 基础环境步骤 → 调用 `deploy_musa_base_env` skill
+   - 应用层步骤 → 在容器内执行命令
+   - 验证步骤 → 执行并检查输出
+3. **逐步执行** — 按文档顺序执行，直到验证步骤完成
+
+### 阶段划分
+
+| 阶段 | 内容 | 执行方式 |
+|------|------|----------|
+| 阶段 1 | 基础环境（驱动、容器） | 调用 Skill |
+| 阶段 2 | 应用部署（模型下载、服务启动） | 执行文档命令 |
+| 阶段 3 | 验证（功能测试、性能测试） | 执行文档命令 |
+
+### 验证终点
+
+执行到文档中的验证步骤为止，例如：
+- `curl http://localhost:8000/v1/chat/completions` (vllm 服务验证)
+- 推理命令输出视频文件 (wan2.2 推理验证)
+
+### 文档格式建议
+
+为便于 AI 解析，文档应包含：
+- 明确的版本信息表格
+- 分步骤的代码块
+- 验证命令和预期输出
 
 ## Sudo Password Handling
 
