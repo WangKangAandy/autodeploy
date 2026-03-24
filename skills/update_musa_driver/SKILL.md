@@ -68,14 +68,14 @@ musa_set_mode(mode="remote", host="192.168.1.100", user="gpuuser", password="xxx
 
 Collect only the minimum required values.
 
-| Variable | Example | Description | Required |
-|----------|---------|-------------|----------|
-| `MT_GPU_DRIVER_VERSION` | `3.3.1-server` | Target driver version | Preferred |
-| `MUSA_SDK_VERSION` | `4.3.1` | SDK version used to resolve compatible driver from mapping | Optional |
-| `MT_GPU_TYPE` | `S4000` | GPU type used for compatibility lookup | Optional |
-| `MT_GPU_ARCH` | `QY2` | GPU architecture suffix used for compatibility lookup | Optional |
-| `DRIVER_PACKAGE_PATH` | `./musa_packages/musa_3.3.1-server_amd64.deb` | Pre-downloaded local driver package path | Optional |
-| `DOCKER_IMAGE` | `registry.mthreads.com/public/musa-train:rc4.3.1-kuae2.1-20251014-juleng` | Validation image when optional container check is requested | Optional |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `MT_GPU_DRIVER_VERSION` | Target driver version (e.g., `3.3.5-server`) | Preferred |
+| `MUSA_SDK_VERSION` | SDK version used to resolve compatible driver from `sdk_compatibility.yml` | Optional |
+| `MT_GPU_TYPE` | GPU type used for compatibility lookup | Optional |
+| `MT_GPU_ARCH` | GPU architecture suffix used for compatibility lookup | Optional |
+| `DRIVER_PACKAGE_PATH` | Pre-downloaded local driver package path | Optional |
+| `DOCKER_IMAGE` | Validation image when optional container check is requested (read from `sdk_compatibility.yml`) | Optional |
 
 ## Driver Resolution Rules
 
@@ -90,6 +90,14 @@ Collect only the minimum required values.
 The YAML structure uses `compatibility` array and `metadata` block. Example lookup:
 
 ```bash
+# Read from yml file - replace with actual values or use variables
+MT_GPU_DRIVER_VERSION=$(yq '.compatibility[] | select(.sdk_version == "'$MUSA_SDK_VERSION'") | .driver_version' \
+  skills/deploy_musa_base_env/config/sdk_compatibility.yml)
+```
+
+Or using Python for complex lookups:
+
+```bash
 MT_GPU_DRIVER_VERSION=$(python3 - <<'PY'
 import yaml
 
@@ -97,14 +105,13 @@ with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encod
     data = yaml.safe_load(f)
 
 entries = data.get("compatibility", [])
-sdk_version = "4.3.1"
-gpu_type = "S4000"
-gpu_arch = "QY2"
+# Use first entry as default, or filter by your requirements
+sdk_version = entries[0].get("sdk_version") if entries else None
+gpu_type = entries[0].get("gpu_type") if entries else None
 
 for item in entries:
     if (item.get("sdk_version") == sdk_version and
-        item.get("gpu_type") == gpu_type and
-        item.get("gpu_arch") == gpu_arch):
+        item.get("gpu_type") == gpu_type):
         print(item["driver_version"])
         break
 PY
@@ -116,21 +123,8 @@ PY
 To find the SDK version for a given driver:
 
 ```bash
-MUSA_SDK_VERSION=$(python3 - <<'PY'
-import yaml
-
-with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encoding="utf-8") as f:
-    data = yaml.safe_load(f)
-
-entries = data.get("compatibility", [])
-driver_version = "3.3.1-server"
-
-for item in entries:
-    if item.get("driver_version") == driver_version:
-        print(item["sdk_version"])
-        break
-PY
-)
+MUSA_SDK_VERSION=$(yq '.compatibility[] | select(.driver_version == "'$DRIVER_VERSION'") | .sdk_version' \
+  skills/deploy_musa_base_env/config/sdk_compatibility.yml)
 ```
 
 ### Download Path Construction
@@ -145,11 +139,14 @@ with open("skills/deploy_musa_base_env/config/sdk_compatibility.yml", "r", encod
     data = yaml.safe_load(f)
 
 template = data["metadata"]["driver_path_template"]
-path = template.format(sdk_version="4.3.1", driver_version="3.3.1-server")
+# Use actual SDK and driver versions from compatibility mapping
+sdk_version = data["compatibility"][0]["sdk_version"]
+driver_version = data["compatibility"][0]["driver_version"]
+path = template.format(sdk_version=sdk_version, driver_version=driver_version)
 print(path)
 PY
 )
-# Output: sh-moss/sw-release/musa/external/4.3.1/deb/musa_3.3.1-server_amd64.deb
+# Output: sh-moss/sw-release/musa/external/{sdk_version}/deb/musa_{driver_version}-server_amd64.deb
 ```
 
 If the runtime does not have PyYAML available, use a small repo-local helper or ask the user for the target driver version instead of inventing one.

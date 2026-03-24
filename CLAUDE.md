@@ -17,45 +17,67 @@ This repository contains executable automation skills. Match user requests to sk
 
 ## Overview
 
-This is an automation workspace for MUSA SDK environment setup, remote MT-GPU execution, and deployment documentation. The repository packages:
-- Documented host deployment flows for MUSA-based environments
-- Unified agent tools for SSH-based remote host and container execution
+This is an OpenClaw plugin for MUSA SDK environment deployment. It provides:
+- OpenClaw plugin with `musa_*` tools for local/remote deployment
+- MCP server (`agent-tools/`) for Claude Code integration via SSH
+- Executable skills for full MUSA environment setup and driver management
 - Feishu bot integration for AI-powered operations
-- Reusable skills and compatibility metadata for repeatable setup work
+
+## Architecture
+
+The repository has two parallel tool implementations:
+
+| Layer | Path | Protocol | Tools |
+|-------|------|----------|-------|
+| OpenClaw Plugin | `src/` | OpenClaw API | `musa_exec`, `musa_docker`, `musa_sync`, `musa_set_mode`, `musa_get_mode` |
+| MCP Server | `agent-tools/src/` | MCP Protocol | `remote-exec`, `remote-docker`, `remote-sync` |
+
+Both layers share the same execution model (local vs remote) and credentials.
 
 ## Repository Structure
 
 | Path | Purpose |
 |------|---------|
-| `agent-tools/src/core/` | Core executors: execRemote, execDocker, syncFiles |
-| `agent-tools/src/tools/` | MCP tool definitions for Claude Code |
+| `index.js` | OpenClaw plugin entry point |
+| `src/core/` | Core executors: executor.js, ssh-client.js, local-exec.js |
+| `src/tools/` | OpenClaw tool definitions (musa_*) |
+| `agent-tools/src/core/` | MCP core executors (TypeScript) |
+| `agent-tools/src/tools/` | MCP tool definitions (remote-*) |
 | `agent-tools/src/server.ts` | MCP Server entry point |
-| `feishu-claude-bridge/` | Feishu bot with Claude API and tool integration |
+| `feishu-claude-bridge/` | Feishu bot with Claude API integration |
 | `skills/deploy_musa_base_env/SKILL.md` | Primary automated workflow for base environment deployment |
 | `skills/update_musa_driver/SKILL.md` | Driver-only upgrade, downgrade, or reinstall workflow |
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK, driver, GPU, and image compatibility mapping |
-| `references/remote-execution-policy.md` | Source of truth for local vs remote command routing |
-| `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
-| `references/moss-download-guide.md` | MOSS download and MinIO Client setup guide |
-| `references/driver-install-guide.md` | Shared driver installation reference |
+| `references/` | Non-executable knowledge resources |
 
 ## Local Build Commands
 
-### Agent Tools
+### OpenClaw Plugin (root)
+```bash
+npm install
+```
 
+### Agent Tools (MCP Server)
 ```bash
 cd agent-tools && npm install && npm run build
 ```
 
 ### Feishu Bridge
-
 ```bash
 cd feishu-claude-bridge && npm install && npm run build
 ```
 
-## Validation Commands
+## Test Commands
 
-This repo relies on targeted environment validation rather than unit tests.
+```bash
+# Agent Tools unit tests
+cd agent-tools && npm test
+
+# Feishu Bridge unit tests
+cd feishu-claude-bridge && npm test
+```
+
+## Deployment Validation Commands
 
 ### Host validation
 ```bash
@@ -80,26 +102,32 @@ The repo operates in a split-machine model:
 - **Machine A (local)** — runs Claude Code/OpenCode, holds codebase, performs code analysis and editing
 - **Remote MT-GPU Machine** — runs Docker containers with MUSA SDK, accessed via SSH
 
-### Remote Tools
+### Mode Management
 
-| Tool | Purpose |
-|------|---------|
-| `remote-exec` | Execute shell commands on Remote MT-GPU Machine host via SSH |
-| `remote-docker` | Execute commands inside Docker containers on Remote MT-GPU Machine via SSH (supports both `docker exec` and `docker run`) |
-| `remote-sync` | Sync files between Machine A and Remote MT-GPU Machine via rsync over SSH |
+Before executing remote commands, set the deployment mode:
+- OpenClaw tools: Use `musa_set_mode(mode="remote", host, user, password, port)`
+- MCP tools: Credentials are loaded from environment or config file
 
-### Tool Routing Rules
+### Tool Routing (OpenClaw vs MCP)
 
-Use the correct tool based on command target:
+| OpenClaw Tool | MCP Tool | Purpose |
+|---------------|----------|---------|
+| `musa_exec` | `remote-exec` | Execute shell commands on remote host via SSH |
+| `musa_docker` | `remote-docker` | Execute commands in Docker containers (supports `docker exec` and `docker run`) |
+| `musa_sync` | `remote-sync` | Sync files between local and remote via rsync |
 
-| Skill describes... | You use... |
-|-------------------|------------|
-| `docker exec <container> <cmd>` | `remote-docker` with `name=<container>`, `command=<cmd>` |
-| `docker run ... <image> <cmd>` | `remote-docker` with `image=<image>`, `command=<cmd>` |
-| `docker cp`, `docker logs`, other docker commands | `remote-exec` wrapping the full docker command |
-| Bare-metal host commands (`dpkg`, `systemctl`, driver checks) | `remote-exec` with `command=<cmd>` |
-| File transfer between Machine A and Remote MT-GPU Machine | `remote-sync` with appropriate direction |
-| Local-only commands (`git`, file reads, code edits) | Standard local tools (Bash, Read, Edit, Write) |
+### Command Routing Rules
+
+Route commands to the appropriate tool based on target:
+
+| Target | Tool | Parameters |
+|--------|------|------------|
+| `docker exec <container> <cmd>` | `musa_docker` / `remote-docker` | `name=<container>`, `command=<cmd>` |
+| `docker run ... <image> <cmd>` | `musa_docker` / `remote-docker` | `image=<image>`, `command=<cmd>` |
+| `docker cp`, `docker logs`, other docker commands | `musa_exec` / `remote-exec` | `command=<full docker command>` |
+| Host commands (`dpkg`, `systemctl`, driver checks) | `musa_exec` / `remote-exec` | `command=<cmd>` |
+| File transfer local ↔ remote | `musa_sync` / `remote-sync` | `localPath`, `remotePath`, `direction` |
+| Local-only commands (`git`, file reads, code edits) | Standard tools | Bash, Read, Edit, Write |
 
 **NEVER use Bash tool for Remote MT-GPU Machine commands.**
 
@@ -115,9 +143,11 @@ The container mounts `~/workspace` → `/workspace` via `-v /home/${GPU_USER}/wo
 
 ### Credentials
 
-Remote tools read credentials from:
+**OpenClaw Plugin:** Credentials are set dynamically via `musa_set_mode` tool at runtime.
+
+**MCP Server:** Credentials are loaded from:
 1. Environment variables (`process.env`) — priority
-2. `agent-tools/config/remote-ssh.env` — fallback (gitignored, contains credentials)
+2. `agent-tools/config/remote-ssh.env` — fallback (gitignored)
 
 Required variables:
 - `GPU_HOST` — Remote MT-GPU Machine hostname or IP
@@ -156,11 +186,24 @@ For driver-only operations (upgrade, downgrade, reinstall), use `skills/update_m
 `skills/deploy_musa_base_env/config/sdk_compatibility.yml` contains compatibility mapping for SDK version, driver version, target environment, and supported validation images.
 
 Current default:
-- `sdk_version`: `4.3.1`
-- `driver_version`: `3.3.1-server`
-- `gpu_type`: `S4000`
-- `gpu_arch`: `QY2`
-- `supported_images`: `registry.mthreads.com/public/musa-train:rc4.3.1-kuae2.1-20251014-juleng`
+- `sdk_version`: `4.3.5`
+- `driver_version`: `3.3.5`
+- `gpu_type`: `S5000`
+- `gpu_arch`: `ph1`
+- `supported_images`: `sh-harbor.mthreads.com/mcctest/musa-train:4.3.5_kuae2.1_torch2.9_deb_2026-03-02_ubuntu`
+
+### OpenClaw Plugin Installation
+
+```bash
+# Install as OpenClaw plugin (linked to source for development)
+openclaw plugins install -l /path/to/autodeploy
+
+# Verify installation
+openclaw plugins info openclaw-musa
+
+# Reinstall after changes
+openclaw plugins uninstall openclaw-musa && openclaw plugins install -l /path/to/autodeploy
+```
 
 ### Remote Configuration Template
 

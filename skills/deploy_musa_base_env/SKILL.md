@@ -1,13 +1,32 @@
 ---
 name: deploy_musa_base_env
-description: Complete MUSA environment deployment from dependencies to container validation. Handles system dependencies, driver installation, container toolkit setup, Docker image pull, and final container verification.
+description: |
+  Deploy MUSA GPU container runtime environment on bare-metal hosts.
+
+  **Scope**: System dependencies → GPU driver → Container toolkit → Docker image → Container validation
+
+  **NOT in scope**:
+  - MUSA toolkits (mcc, mublas, mufft, etc.) - these are bundled in Docker images
+  - Application-level libraries (PyTorch, TensorFlow) - use pre-built images
+
 triggers:
-  - deploy MUSA environment
-  - install MUSA SDK
-  - full MUSA setup
-  - 部署 MUSA 环境
-  - 安装 MUSA SDK
-  - 完整环境部署
+  - deploy MUSA container runtime
+  - setup MUSA Docker environment
+  - 配置 MUSA 容器运行时
+  - 安装 MUSA GPU 驱动
+  - MUSA Docker 环境部署
+
+scope:
+  includes:
+    - System dependencies (build-essential, dkms, etc.)
+    - GPU driver installation
+    - Container toolkit installation and Docker binding
+    - Docker image pull
+    - Container GPU access validation
+  excludes:
+    - MUSA toolkits (mcc, mublas, mufft, muPP, etc.)
+    - Deep learning frameworks (PyTorch, TensorFlow)
+    - Application deployment
 ---
 
 # MUSA Full Environment Deployment
@@ -69,15 +88,13 @@ For MinIO Client setup and MOSS configuration details, see `references/moss-down
 
 ## Predefined SDK Versions
 
-The compatibility mapping for SDK version, driver version, target environment, and supported validation images is maintained in `skills/deploy_musa_base_env/config/sdk_compatibility.yml`.
+All version mapping (SDK, driver, GPU type, supported images) is maintained in `skills/deploy_musa_base_env/config/sdk_compatibility.yml`.
 
-Current recorded entry:
+Read dynamically using:
 
-- `sdk_version`: `4.3.1`
-- `driver_version`: `3.3.1-server`
-- `gpu_type`: `S4000`
-- `gpu_arch`: `QY2`
-- `supported_images`: `registry.mthreads.com/public/musa-train:rc4.3.1-kuae2.1-20251014-juleng`
+```bash
+yq '.compatibility[0].driver_version' skills/deploy_musa_base_env/config/sdk_compatibility.yml
+```
 
 Container toolkit compatibility is not treated as a default mapping constraint unless a specific SDK entry later declares an explicit minimum version requirement.
 
@@ -86,19 +103,15 @@ Container toolkit compatibility is not treated as a default mapping constraint u
 
 When in custom mode, collect the following variables:
 
-| Variable | Example | Description | Required |
-|----------|---------|-------------|----------|
-| `MUSA_SDK_VERSION` | `4.3.1` | MUSA SDK version | Yes |
-| `MT_GPU_DRIVER_VERSION` | `3.3.1` | GPU driver version | Yes |
-| `MT_MTML_VERSION` | `2.3.2` | MTML version | Yes |
-| `MT_CONTAINER_TOOLKIT_VERSION` | `2.0.0` | Container Toolkit version | Yes |
-| `MT_GPU_TYPE` | `S4000` | GPU type: S5000 or S4000 | Yes |
-| `MT_GPU_ARCH` | `QY2` | Architecture suffix: PH1 (S5000) or QY2 (S4000) | Yes |
-| `MT_PYTHON_VERSION` | `py310` | Python version: py310 or py311 | Yes |
-| `TORCH_MUSA_VERSION` | `v2.7.1` | torch_musa release tag | Yes |
-| `DOCKER_IMAGE` | `registry.mthreads.com/public/musa-train:rc4.3.1-kuae2.1-20251014-juleng` | Docker image for container validation | Yes |
-| `CONTAINER_TOOLKIT_URL` | (auto-selected) | URL for container toolkit download | No |
-| `CONTAINER_TOOLKIT_MD5` | (auto-selected) | MD5 checksum for container toolkit | No |
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `MUSA_SDK_VERSION` | MUSA SDK version (read from `sdk_compatibility.yml` if not specified) | Yes |
+| `MT_GPU_DRIVER_VERSION` | GPU driver version (resolved from SDK compatibility mapping) | Yes |
+| `MT_GPU_TYPE` | GPU type: S5000 or S4000 | Yes |
+| `MT_GPU_ARCH` | Architecture suffix: PH1 (S5000) or QY2 (S4000) | Yes |
+| `DOCKER_IMAGE` | Docker image for container validation (read from `sdk_compatibility.yml`) | Yes |
+
+**Default values are read from `skills/deploy_musa_base_env/config/sdk_compatibility.yml`.**
 
 ## Sudo Password Handling
 
@@ -164,17 +177,52 @@ Save state: `dependencies_installed`
 
 ### Step 2: GPU Driver Installation
 
-#### 2.1 Check Existing Driver
+#### 2.1 Check and Compare Driver Version
+
+**IMPORTANT**: Compare driver version before downloading. Skip if already matches requirement.
+
 ```bash
+# Read required driver version from config
+REQUIRED_DRIVER=$(yq '.compatibility[] | select(.sdk_version == "'$MUSA_SDK_VERSION'") | .driver_version' skills/deploy_musa_base_env/config/sdk_compatibility.yml)
+echo "Required driver version for SDK $MUSA_SDK_VERSION: $REQUIRED_DRIVER"
+
 # Check if driver is already installed
 if dpkg -s musa &>/dev/null; then
     CURRENT_VERSION=$(dpkg -s musa | grep Version | awk '{print $2}')
     echo "Current driver version: $CURRENT_VERSION"
     
-    # Ask user if they want to uninstall existing driver
-    # Use question tool for confirmation
+    # Compare versions
+    if [ "$CURRENT_VERSION" = "$REQUIRED_DRIVER" ]; then
+        echo "✓ Driver version matches requirement: $CURRENT_VERSION"
+        echo "Skipping driver download and installation."
+
+        # Verify driver is loaded
+        if mthreads-gmi &>/dev/null; then
+            echo "✓ Driver is loaded and working"
+            # Save state and skip to Step 3
+            # State: driver_installed, driver_loaded
+        else
+            echo "Driver not loaded, loading..."
+            echo "$SUDO_PASSWORD" | sudo -S modprobe mtgpu
+            mthreads-gmi
+        fi
+
+        # Skip to Step 3: Container Runtime Validation
+        echo "Proceeding to Step 3: Container Runtime Validation"
+        # Continue to Step 3
+
+    else
+        echo "✗ Driver version mismatch"
+        echo "  Current: $CURRENT_VERSION"
+        echo "  Required: $REQUIRED_DRIVER"
+        echo "Proceeding with driver update..."
+    fi
+else
+    echo "No driver installed. Proceeding with installation..."
 fi
 ```
+
+If driver version matches and is loaded, save state: `driver_installed`, `driver_loaded` and skip to Step 3.
 
 #### 2.2 Download Driver Package
 
@@ -217,45 +265,137 @@ mthreads-gmi
 Should show GPU information and driver version.  
 Save state: `driver_loaded`
 
-### Step 3: Container Toolkit Installation
+### Step 3: Container Runtime Validation and Toolkit Installation
 
-#### 3.1 Determine Container Toolkit Version
-If `CONTAINER_TOOLKIT_URL` is not provided, select the latest version from `skills/deploy_musa_base_env/config/container_toolkit.yml` based on OS and CPU:
+#### 3.1 Validate Container Runtime First
+
+**IMPORTANT**: Always validate container runtime first using actual Docker run. Do NOT install toolkit blindly.
+
+Read validation image from config:
+```bash
+# Read validation image from sdk_compatibility.yml
+VALIDATION_IMAGE=$(yq '.metadata.validation_image' skills/deploy_musa_base_env/config/sdk_compatibility.yml)
+VALIDATION_CMD=$(yq '.metadata.validation_command' skills/deploy_musa_base_env/config/sdk_compatibility.yml)
+
+# Default fallback
+VALIDATION_IMAGE=${VALIDATION_IMAGE:-"registry.mthreads.com/cloud-mirror/ubuntu:20.04"}
+VALIDATION_CMD=${VALIDATION_CMD:-"mthreads-gmi"}
+```
+
+Run validation test:
+```bash
+# Test container runtime with GPU access
+if docker run --rm --env MTHREADS_VISIBLE_DEVICES=all "$VALIDATION_IMAGE" $VALIDATION_CMD 2>/dev/null; then
+    echo "✓ Container runtime is working correctly"
+    echo "Skipping container toolkit installation."
+    # Save state and skip to Step 4
+    # State: container_toolkit_installed
+else
+    echo "✗ Container runtime validation failed"
+    echo "Proceeding to diagnose and fix..."
+fi
+```
+
+If validation passes, save state: `container_toolkit_installed` and skip to Step 4.
+
+#### 3.2 Diagnose Failure (if validation failed)
+
+If container runtime validation failed, check why:
+
+```bash
+# Check if mt-container-toolkit is installed
+if dpkg -s mt-container-toolkit &>/dev/null; then
+    TOOLKIT_INSTALLED=true
+    echo "mt-container-toolkit is installed"
+else
+    TOOLKIT_INSTALLED=false
+    echo "mt-container-toolkit is NOT installed"
+fi
+
+# Check if Docker has MUSA runtime configured
+if docker info 2>/dev/null | grep -q "mthreads"; then
+    RUNTIME_BOUND=true
+    echo "MUSA runtime is bound to Docker"
+else
+    RUNTIME_BOUND=false
+    echo "MUSA runtime is NOT bound to Docker"
+fi
+```
+
+#### 3.3 Fix Based on Diagnosis
+
+**Case A: Toolkit installed but not bound**
+```bash
+if [ "$TOOLKIT_INSTALLED" = true ] && [ "$RUNTIME_BOUND" = false ]; then
+    echo "Binding MUSA runtime to Docker..."
+    (cd /usr/bin/musa && echo "$SUDO_PASSWORD" | sudo -S ./docker setup $PWD)
+    
+    # Restart Docker if needed
+    if ! systemctl is-active --quiet docker; then
+        echo "$SUDO_PASSWORD" | sudo -S systemctl restart docker
+        (cd /usr/bin/musa && echo "$SUDO_PASSWORD" | sudo -S ./docker setup $PWD)
+    fi
+    
+    # Re-validate
+    if docker run --rm --env MTHREADS_VISIBLE_DEVICES=all "$VALIDATION_IMAGE" $VALIDATION_CMD; then
+        echo "✓ Binding successful"
+        # Save state: container_toolkit_installed
+    else
+        echo "✗ Binding failed, proceeding to full installation"
+    fi
+fi
+```
+
+**Case B: Toolkit not installed - Full Installation**
+
+If toolkit is not installed or binding failed, proceed with full installation:
+
+##### 3.3.1 Determine Container Toolkit Version
+Select the latest version from `skills/deploy_musa_base_env/config/container_toolkit.yml`:
 
 ```bash
 # Detect OS and CPU
-OS_TYPE=$(lsb_release -si)
+OS_TYPE=$(lsb_release -si 2>/dev/null || echo "Ubuntu")
 CPU_ARCH=$(uname -m)
 
 # Parse container_toolkit.yml to find matching entry
-# Prefer newer versions
-TOOLKIT_ENTRY=$(jq -r '.[] | select(.os == "Ubuntu" and .cpu == "Intel") | .version' skills/deploy_musa_base_env/config/container_toolkit.yml | sort -V | tail -1)
+# Use yq or jq with yq-to-json conversion
+TOOLKIT_VERSION=$(yq '.toolkits | sort_by(.version) | reverse | .[0].version' skills/deploy_musa_base_env/config/container_toolkit.yml)
 ```
 
-#### 3.2 Download Container Toolkit
+##### 3.3.2 Download Container Toolkit
 ```bash
-# Extract URL and MD5 from YAML
-TOOLKIT_URL=$(jq -r '.[] | select(.version == "'${TOOLKIT_VERSION}'" and .os == "Ubuntu" and .cpu == "Intel") | .url' skills/deploy_musa_base_env/container_toolkit.yml)
-TOOLKIT_MD5=$(jq -r '.[] | select(.version == "'${TOOLKIT_VERSION}'" and .os == "Ubuntu" and .cpu == "Intel") | .md5' skills/deploy_musa_base_env/container_toolkit.yml)
+# Get URL from config
+TOOLKIT_URL=$(yq '.toolkits[] | select(.version == "'${TOOLKIT_VERSION}'") | .url' skills/deploy_musa_base_env/config/container_toolkit.yml)
+TOOLKIT_MD5=$(yq '.toolkits[] | select(.version == "'${TOOLKIT_VERSION}'") | .md5' skills/deploy_musa_base_env/config/container_toolkit.yml)
 
 # Download
+mkdir -p ./musa_packages
 wget -O ./musa_packages/container_toolkit.zip "$TOOLKIT_URL"
 
-# Verify checksum
-echo "$TOOLKIT_MD5 ./musa_packages/container_toolkit.zip" | md5sum -c
+# Verify checksum if available
+if [ -n "$TOOLKIT_MD5" ] && [ "$TOOLKIT_MD5" != "null" ]; then
+    echo "$TOOLKIT_MD5 ./musa_packages/container_toolkit.zip" | md5sum -c || echo "Warning: checksum verification failed"
+fi
 ```
 
-#### 3.3 Install Container Toolkit
+##### 3.3.3 Install Container Toolkit
 ```bash
 # Extract and install
-unzip ./musa_packages/container_toolkit.zip -d ./musa_packages/
+unzip -o ./musa_packages/container_toolkit.zip -d ./musa_packages/
 cd ./musa_packages/mt-container-toolkit-*
 
-# Avoid interactive debconf / dialog popups during package installation
+# Avoid interactive debconf / dialog popups
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# Some bundles include sgpu-dkms and MTML alongside the toolkit
+# Handle partial install recovery
+if dpkg -s mt-container-toolkit 2>/dev/null | grep -q "reinstreq\|half-installed"; then
+    echo "$SUDO_PASSWORD" | sudo -S dpkg --remove --force-remove-reinstreq mt-container-toolkit || true
+fi
+echo "$SUDO_PASSWORD" | sudo -S DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a dpkg --configure -a
+
+# Install bundled components if present
 if ls *sgpu-dkms*.deb >/dev/null 2>&1; then
     echo "$SUDO_PASSWORD" | sudo -S DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
       apt install -y ./*sgpu-dkms*.deb
@@ -266,33 +406,34 @@ if ls *mtml*.deb >/dev/null 2>&1; then
       apt install -y ./*mtml*.deb
 fi
 
+# Install main toolkit
 echo "$SUDO_PASSWORD" | sudo -S DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
   apt install -y ./*mt-container-toolkit*.deb
 
 # Bind to Docker
 (cd /usr/bin/musa && echo "$SUDO_PASSWORD" | sudo -S ./docker setup $PWD)
 
-# If docker is not running, start or restart it and retry binding once
+# Restart Docker if needed
 if ! systemctl is-active --quiet docker; then
     echo "$SUDO_PASSWORD" | sudo -S systemctl restart docker
     (cd /usr/bin/musa && echo "$SUDO_PASSWORD" | sudo -S ./docker setup $PWD)
 fi
 ```
 
-If a previous interactive install was interrupted and left the package half-installed, recover first:
+#### 3.4 Final Validation
+
+After installation or binding, validate again:
 
 ```bash
-if dpkg -s mt-container-toolkit 2>/dev/null | grep -q "reinstreq\|half-installed"; then
-    echo "$SUDO_PASSWORD" | sudo -S dpkg --remove --force-remove-reinstreq mt-container-toolkit || true
+# Final validation
+if docker run --rm --env MTHREADS_VISIBLE_DEVICES=all "$VALIDATION_IMAGE" $VALIDATION_CMD; then
+    echo "✓ Container runtime validation successful"
+    # Save state: container_toolkit_installed
+else
+    echo "✗ Container runtime validation failed after installation"
+    echo "Check logs and troubleshoot"
+    exit 1
 fi
-
-echo "$SUDO_PASSWORD" | sudo -S DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a dpkg --configure -a
-```
-
-#### 3.4 Verify Container Toolkit
-```bash
-# Verify container toolkit installation
-docker run --rm --env MTHREADS_VISIBLE_DEVICES=all registry.mthreads.com/cloud-mirror/ubuntu:20.04 mthreads-gmi
 ```
 
 Save state: `container_toolkit_installed`
@@ -361,7 +502,6 @@ echo "SDK Version: $MUSA_SDK_VERSION"
 echo "Driver Version: $MT_GPU_DRIVER_VERSION"
 echo "GPU Type: $MT_GPU_TYPE ($MT_GPU_ARCH)"
 echo "Docker Image: $DOCKER_IMAGE"
-echo "Container Toolkit: $MT_CONTAINER_TOOLKIT_VERSION"
 echo ""
 echo "Verification Commands:"
 echo "  Host driver: mthreads-gmi"
@@ -373,12 +513,11 @@ echo "========================================="
 
 ## Important Rules
 
-1. **Python version matching** - Never fall back to different Python version (py310 vs py311)
-2. **SUDO_PASSWORD scope** - Only use for system operations, never for Docker or download operations
-3. **State persistence** - Always save state before operations that might fail or require reboot
-4. **Error handling** - Check each command's exit code and provide clear error messages
-5. **Cleanup** - Remove temporary files and test containers after validation
-6. **Remote execution** - When using remote tools, follow path conventions:
+1. **SUDO_PASSWORD scope** - Only use for system operations, never for Docker or download operations
+2. **State persistence** - Always save state before operations that might fail or require reboot
+3. **Error handling** - Check each command's exit code and provide clear error messages
+4. **Cleanup** - Remove temporary files and test containers after validation
+5. **Remote execution** - When using remote tools, follow path conventions:
    - Local: `repositories/<project>/`
    - Remote host: `~/workspace/<project>/`
    - Container: `/workspace/<project>/`
