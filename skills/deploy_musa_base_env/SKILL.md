@@ -249,8 +249,8 @@ fi
 # Install new driver
 echo "$SUDO_PASSWORD" | sudo -S apt install ./musa_packages/musa_${MT_GPU_DRIVER_VERSION}-server_amd64.deb
 
-# load driver
-echo "$SUDO_PASSWORD" | sudo -S modprobe mtgpu
+# Reload driver module (unload old, load new)
+echo "$SUDO_PASSWORD" | sudo -S sh -c 'modprobe -rv mtgpu 2>/dev/null || true; modprobe mtgpu'
 ```
 
 Save state: `driver_installed`

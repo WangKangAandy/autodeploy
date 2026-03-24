@@ -298,13 +298,11 @@ Save state: `driver_installed`
 ### Step 6: Reload Driver Without Reboot
 
 Prefer module reload before asking for reboot.
-After package installation, the running kernel may still have the old `mtgpu` module loaded. Always validate the loaded driver version after reload instead of assuming the new package version is already active.
+After package installation, the running kernel may still have the old `mtgpu` module loaded.
 
 ```bash
-echo "$SUDO_PASSWORD" | sudo -S modprobe mtgpu || {
-  echo "$SUDO_PASSWORD" | sudo -S modprobe -rv mtgpu 2>/dev/null || true
-  echo "$SUDO_PASSWORD" | sudo -S modprobe mtgpu
-}
+# Reload driver module (unload old, load new)
+echo "$SUDO_PASSWORD" | sudo -S sh -c 'modprobe -rv mtgpu 2>/dev/null || true; modprobe mtgpu'
 ```
 
 If module loading still fails, stop and ask the user for a manual reboot.
@@ -315,14 +313,6 @@ Save state: `driver_loaded`
 ### Step 7: Validate Host Driver
 
 ```bash
-mthreads-gmi
-```
-
-If `mthreads-gmi` still reports the old driver version after installation, run another explicit reload and validate again:
-
-```bash
-echo "$SUDO_PASSWORD" | sudo -S modprobe -rv mtgpu 2>/dev/null || true
-echo "$SUDO_PASSWORD" | sudo -S modprobe mtgpu
 mthreads-gmi
 ```
 
