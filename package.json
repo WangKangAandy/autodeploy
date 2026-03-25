@@ -1,12 +1,23 @@
 {
   "name": "openclaw-musa",
-  "version": "1.0.0",
-  "description": "OpenClaw plugin for MUSA SDK environment deployment",
+  "version": "1.1.0",
+  "description": "OpenClaw platform runtime layer for MUSA SDK environment deployment",
   "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build",
+    "install-plugin": "node scripts/install.js install",
+    "uninstall-plugin": "node scripts/install.js uninstall"
+  },
   "files": [
     "index.js",
     "openclaw.plugin.json",
+    "dist/**/*",
     "src/**/*",
+    "scripts/**/*",
+    "AGENTS.autodeploy.md",
     "skills/**/*",
     "references/**/*"
   ],
@@ -15,11 +26,16 @@
     "plugin",
     "musa",
     "mt-gpu",
-    "deployment"
+    "deployment",
+    "platform-runtime"
   ],
   "license": "MIT",
   "dependencies": {
     "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   },
   "peerDependencies": {
     "openclaw": ">=1.0.0"
@@ -31,6 +47,7 @@
   "openclaw": {
     "extensions": [
       "./index.js"
-    ]
+    ],
+    "installHook": "./scripts/install.js"
   }
 }

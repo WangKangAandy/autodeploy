@@ -1,18 +1,20 @@
 # autodeploy
 
-Automation workspace for MUSA SDK environment setup, remote MT-GPU execution, and deployment runbooks.
+Platform runtime layer for MUSA SDK environment deployment and GPU management.
 
-This repository packages:
+This repository provides:
 
-- documented host deployment flows for MUSA-based environments
-- unified agent tools for SSH-based remote host and container execution
-- Feishu bot integration for AI-powered operations
-- reusable skills and compatibility metadata for repeatable setup work
+- **Unified Dispatcher** (`musa_dispatch`) — single entry point for all MUSA operations
+- **Document-Driven Execution** — deploy from markdown documents with safety validation
+- **Static Platform Constitution** — AGENTS.autodeploy.md auto-merged to workspace
+- **Agent Tools** — SSH-based remote host and container execution
+- **Feishu Bot Integration** — AI-powered operations via chat
 
 ## What This Repo Is For
 
 - Deploy a base MUSA environment on a local or remote Ubuntu host
 - Update or reinstall only the MUSA driver without re-running the full stack
+- Execute deployment from provided documentation (document-driven mode)
 - Run build, validation, and GPU checks on a Remote MT-GPU Machine
 - Interact with MUSA environment via Feishu bot
 - Keep deployment knowledge in versioned docs instead of scattered local notes
@@ -21,6 +23,12 @@ This repository packages:
 
 | Path | Purpose |
 |------|---------|
+| `index.js` | OpenClaw plugin entry point with auto-bootstrap |
+| `src/dispatcher/` | Unified dispatcher (`musa_dispatch`) for intent routing |
+| `src/adapter/` | OpenClaw adapter hooks (before_prompt_build, session_end) |
+| `src/core/state-manager.ts` | State persistence for deployment operations |
+| `src/utils/agents-merge.js` | AGENTS.autodeploy.md auto-merge utility |
+| `AGENTS.autodeploy.md` | Static platform constitution (auto-merged to workspace) |
 | `agent-tools/` | Unified tool layer for Claude Code, OpenCode, and Feishu bot |
 | `agent-tools/src/core/` | Core executors (execRemote, execDocker, syncFiles) |
 | `agent-tools/src/tools/` | MCP tool definitions |
@@ -29,13 +37,36 @@ This repository packages:
 | `skills/update_musa_driver/SKILL.md` | Driver-only upgrade, downgrade, or reinstall workflow |
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK, driver, GPU, and image compatibility mapping |
 | `references/remote-execution-policy.md` | Source of truth for local vs remote command routing |
+| `references/document-driven-execution.md` | Document-driven execution workflow specification |
 | `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
-| `docs/单机环境部署.md` | Manual single-machine deployment reference |
-| `docs/环境问题FAQ.md` | Known environment issues and recovery notes |
 
 ## Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                    Platform Runtime Layer                    │
+├─────────────────────────────────────────────────────────────┤
+│  AGENTS.autodeploy.md (Static Constitution)                 │
+│  - Auto-merged to OpenClaw workspace                        │
+│  - Platform rules, intent routing, risk levels              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Unified Dispatcher                        │
+├─────────────────────────────────────────────────────────────┤
+│  musa_dispatch(intent, context?)                            │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ Intent Routing:                                       │  │
+│  │ - deploy_env      → Full environment deployment       │  │
+│  │ - update_driver   → Driver-only operations            │  │
+│  │ - gpu_status      → Read-only GPU check                │  │
+│  │ - validate        → Environment validation             │  │
+│  │ - execute_document → Document-driven deployment        │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      Entry Points                           │
 ├─────────────────┬─────────────────┬─────────────────────────┤
@@ -58,9 +89,6 @@ This repository packages:
 │  │ - remote-docker.ts (MCP tool)                        │  │
 │  │ - remote-sync.ts (MCP tool)                          │  │
 │  └──────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ server.ts (MCP Server entry point)                   │  │
-│  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -76,7 +104,14 @@ This repository packages:
 
 ## Quick Start
 
-### 1. Agent Tools Setup
+### 1. Plugin Build (Required)
+
+```bash
+npm install
+npm run build  # Compile TypeScript modules
+```
+
+### 2. Agent Tools Setup (Optional, for MCP usage)
 
 ```bash
 cd agent-tools
@@ -84,7 +119,7 @@ npm install
 npm run build
 ```
 
-### 2. Configure Remote Access
+### 3. Configure Remote Access
 
 ```bash
 cp agent-tools/config/remote-ssh.env.example agent-tools/config/remote-ssh.env
@@ -115,12 +150,41 @@ npm run dev
 ## Run Tests
 
 ```bash
+# Root tests (dispatcher, state manager)
+npm test
+
 # Agent Tools tests
 cd agent-tools && npm test
 
 # Feishu Bridge tests
 cd feishu-claude-bridge && npm test
 ```
+
+## Unified Dispatcher Usage
+
+The `musa_dispatch` tool is the primary entry point for MUSA operations:
+
+| Intent | Description | Risk Level |
+|--------|-------------|------------|
+| `deploy_env` | Full MUSA environment deployment | destructive |
+| `update_driver` | Driver-only operations | destructive |
+| `gpu_status` | GPU status check | read_only |
+| `validate` | Environment validation | read_only |
+| `execute_document` | Document-driven deployment | destructive |
+
+### Document-Driven Execution
+
+Deploy from a markdown document:
+
+```javascript
+// From local file
+musa_dispatch(intent="execute_document", context={path: "/path/to/deploy.md"})
+
+// From pasted content
+musa_dispatch(intent="execute_document", context={content: "# Guide\n..."})
+```
+
+See `references/document-driven-execution.md` for details.
 
 ## Scope
 

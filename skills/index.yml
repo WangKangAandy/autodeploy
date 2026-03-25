@@ -8,6 +8,10 @@ skills:
     path: deploy_musa_base_env/SKILL.md
     description: Complete MUSA environment deployment from dependencies to container validation
     category: deployment
+    # Dispatcher routing
+    dispatch_intent: deploy_env
+    dispatch_entry: 'musa_dispatch(intent="deploy_env")'
+    risk_level: destructive
     triggers:
       - deploy MUSA environment
       - install MUSA SDK
@@ -34,6 +38,10 @@ skills:
     path: update_musa_driver/SKILL.md
     description: Targeted MUSA driver update or reinstall without full environment deployment
     category: maintenance
+    # Dispatcher routing
+    dispatch_intent: update_driver
+    dispatch_entry: 'musa_dispatch(intent="update_driver")'
+    risk_level: destructive
     triggers:
       - update driver
       - upgrade driver
