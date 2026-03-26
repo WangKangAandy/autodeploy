@@ -1,6 +1,6 @@
 {
   "name": "openclaw-musa",
-  "version": "1.1.0",
+  "version": "1.0.1",
   "description": "OpenClaw platform runtime layer for MUSA SDK environment deployment",
   "main": "index.js",
   "scripts": {
