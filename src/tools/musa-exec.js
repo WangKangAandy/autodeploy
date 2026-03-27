@@ -6,14 +6,23 @@ const {
   getRemoteConfig,
   isRemoteReady,
   execute,
+  refreshCache,
 } = require("../core/executor");
 const { formatToolResult, formatToolError } = require("../core/utils");
+
+// StateManager reference for persistence
+let stateManager = null;
 
 /**
  * Register musa_set_mode tool
  * Sets the deployment mode (local or remote)
+ *
+ * @param {Object} api - OpenClaw plugin API
+ * @param {Object} sm - StateManager instance for persistence
  */
-function registerMusaSetModeTool(api) {
+function registerMusaSetModeTool(api, sm = null) {
+  stateManager = sm;
+
   api.registerTool({
     name: "musa_set_mode",
     description: `Set MUSA deployment mode: local or remote.
@@ -66,13 +75,35 @@ This tool must be called before using musa_exec for remote deployment.`,
             );
           }
 
-          setMode("remote", {
+          // StateManager is the single source of truth
+          // Only write to StateManager, then refresh cache
+          if (!stateManager) {
+            return formatToolError(
+              "StateManager not available. Cannot persist remote mode configuration.",
+              { mode }
+            );
+          }
+
+          // 1. Register/update the host in StateManager
+          const hostId = await stateManager.registerHost({
             host,
             user,
             password,
             port,
             sudoPasswd: sudoPasswd || password,
+            status: "online",
+            environment: {
+              dockerAvailable: false,
+              toolkitInstalled: false,
+              mthreadsGmiAvailable: false,
+            },
           });
+
+          // 2. Set as default host (this persists the mode)
+          await stateManager.setDefaultHost(hostId);
+
+          // 3. Refresh executor cache from StateManager
+          await refreshCache();
 
           return formatToolResult({
             success: true,
@@ -85,7 +116,12 @@ This tool must be called before using musa_exec for remote deployment.`,
             },
           });
         } else {
-          setMode("local", null);
+          // Local mode: clear default host
+          if (stateManager) {
+            await stateManager.clearDefaultHost();
+            await refreshCache();
+          }
+
           return formatToolResult({
             success: true,
             mode: "local",
@@ -93,7 +129,7 @@ This tool must be called before using musa_exec for remote deployment.`,
           });
         }
       } catch (err) {
-        return formatToolError(err, { params });
+        return formatToolError(err, { mode: params.mode });
       }
     },
   });
@@ -179,6 +215,9 @@ Common use cases:
 /**
  * Register musa_get_mode tool
  * Returns the current deployment mode
+ *
+ * Reads from StateManager (single source of truth), not executor cache.
+ * Returns sanitized info (no password/sudoPasswd).
  */
 function registerMusaGetModeTool(api) {
   api.registerTool({
@@ -187,31 +226,94 @@ function registerMusaGetModeTool(api) {
 
 Returns:
 - mode: 'local' or 'remote'
-- connection info if in remote mode`,
+- connection info if in remote mode (sanitized - no passwords)`,
     parameters: {
       type: "object",
       properties: {},
     },
     async execute(_toolCallId, _params) {
-      const mode = getMode();
-      const config = getRemoteConfig();
+      // Read from StateManager (single source of truth)
+      if (!stateManager) {
+        // Fallback to executor cache if StateManager not available
+        const mode = getMode();
+        const config = getRemoteConfig();
 
-      if (mode === "remote" && config) {
+        if (mode === "remote" && config) {
+          return formatToolResult({
+            mode: "remote",
+            connection: {
+              host: config.host,
+              user: config.user,
+              port: config.port,
+              // Note: passwords not included for security
+            },
+            ready: isRemoteReady(),
+            source: "executor_cache",
+          });
+        }
+
         return formatToolResult({
-          mode: "remote",
-          connection: {
-            host: config.host,
-            user: config.user,
-            port: config.port,
-          },
-          ready: isRemoteReady(),
+          mode: "local",
+          ready: true,
+          source: "executor_cache",
         });
       }
 
-      return formatToolResult({
-        mode: "local",
-        ready: true,
-      });
+      // Primary path: read from StateManager
+      try {
+        const mode = await stateManager.getExecutionMode();
+        const defaultHost = await stateManager.getDefaultHost();
+
+        if (mode === "remote" && defaultHost) {
+          return formatToolResult({
+            mode: "remote",
+            connection: {
+              host: defaultHost.host,
+              user: defaultHost.user,
+              port: defaultHost.port || 22,
+              // Note: passwords not included for security
+            },
+            hostId: defaultHost.id,
+            status: defaultHost.status,
+            environment: defaultHost.environment,
+            ready: true,
+            source: "state_manager",
+          });
+        }
+
+        return formatToolResult({
+          mode: "local",
+          ready: true,
+          hostsCount: (await stateManager.loadState("hosts.json")).length,
+          source: "state_manager",
+        });
+      } catch (err) {
+        // On error, fallback to executor cache
+        console.error("[musa_get_mode] Failed to read from StateManager:", err.message);
+        const mode = getMode();
+        const config = getRemoteConfig();
+
+        if (mode === "remote" && config) {
+          return formatToolResult({
+            mode: "remote",
+            connection: {
+              host: config.host,
+              user: config.user,
+              port: config.port,
+            },
+            ready: isRemoteReady(),
+            source: "executor_cache_fallback",
+            error: err.message,
+          });
+        }
+
+        return formatToolResult({
+          mode: "local",
+          ready: true,
+          source: "executor_cache_fallback",
+          error: err.message,
+        });
+      }
     },
   });
 }

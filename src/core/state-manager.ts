@@ -11,7 +11,7 @@ import * as path from "path"
 // Type Definitions
 // ============================================================================
 
-export type Intent = "deploy_env" | "update_driver" | "gpu_status" | "run_container" | "validate" | "sync" | "auto" | "execute_document"
+export type Intent = "deploy_env" | "update_driver" | "gpu_status" | "run_container" | "validate" | "sync" | "auto" | "execute_document" | "prepare_model" | "prepare_dataset" | "prepare_package" | "manage_images" | "prepare_repo"
 
 export type RiskLevel = "read_only" | "safe_write" | "destructive"
 
@@ -22,7 +22,10 @@ export interface HostState {
   id: string
   host: string
   user: string
+  password?: string       // SSH password (可选，敏感信息)
   port: number
+  isDefault?: boolean     // 是否为默认主机（用于派生执行模式）
+  sudoPasswd?: string     // sudo 密码（可选）
   status: "online" | "offline" | "unknown"
   lastProbeTime: string
   source: HostSource  // 记录来源
@@ -74,6 +77,9 @@ export interface OperationKey {
 
 export interface Operation {
   id: string
+  traceId?: string           // Trace ID for request chain tracing
+  parentSpanId?: string      // Parent span ID for span hierarchy
+  sourceService?: string     // Calling source service (for cross-service debugging)
   type: "deployment" | "driver_update" | "validation" | "benchmark"
   intent: Intent
   operationKey: OperationKey  // 持久化的 operation key（幂等检查用）
@@ -103,6 +109,8 @@ export interface Operation {
 export interface Job {
   id: string
   operationId: string
+  traceId?: string           // Trace ID for request chain tracing
+  // Note: Phase 1 only persists traceId; can be extended to spanId/sourceService for finer-grained tracing
   hostId?: string  // 关联的 host（用于 context-builder 的 relevance 排序）
   status: "pending" | "running" | "completed" | "failed"
   progress: {
@@ -301,7 +309,12 @@ export class StateManager {
    */
   async startOperationIfNoConflict(
     intent: Intent,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    trace?: {
+      traceId: string
+      parentSpanId?: string
+      sourceService?: string
+    }
   ): Promise<{ started: boolean; operationId?: string; conflict?: Operation }> {
     const acquired = await this.acquireLock()
     if (!acquired) {
@@ -316,7 +329,7 @@ export class StateManager {
         return { started: false, conflict }
       }
 
-      const operationId = await this.startOperation(intent, params)
+      const operationId = await this.startOperation(intent, params, trace)
       return { started: true, operationId }
     } finally {
       await this.releaseLock()
@@ -348,9 +361,37 @@ export class StateManager {
     }
   }
 
+  /**
+   * Detect current execution mode from persisted executor state
+   */
+  /**
+   * Detect execution mode (synchronous version for loadSnapshot)
+   * Reuses the same logic as async getExecutionMode
+   *
+   * Note: This is kept synchronous for loadSnapshot compatibility.
+   * It reads directly from cache/files to avoid async cascade.
+   */
   private detectMode(): "local" | "remote" {
-    // This is determined by the executor module
-    // For now, return a default
+    // Try cache first (fast path)
+    const cached = this.cache.get("hosts.json")
+    if (cached) {
+      const hosts = cached as HostState[]
+      const hasDefault = hosts.some(h => h.isDefault === true)
+      return hasDefault ? "remote" : "local"
+    }
+
+    // Fallback to file read (sync for loadSnapshot)
+    try {
+      const hostsFile = path.join(this.stateDir, "hosts.json")
+      if (fs.existsSync(hostsFile)) {
+        const content = fs.readFileSync(hostsFile, "utf-8")
+        const hosts = JSON.parse(content)
+        const hasDefault = hosts.some((h: HostState) => h.isDefault === true)
+        return hasDefault ? "remote" : "local"
+      }
+    } catch {
+      // Ignore errors
+    }
     return "local"
   }
 
@@ -438,10 +479,113 @@ export class StateManager {
   }
 
   // ============================================================================
+  // Default Host Management (for execution mode derivation)
+  // ============================================================================
+
+  /**
+   * Get the default host (used to derive execution mode)
+   * Returns null if no default host is set (local mode)
+   */
+  async getDefaultHost(): Promise<HostState | null> {
+    const hosts = await this.loadState<HostState[]>("hosts.json")
+    return hosts.find(h => h.isDefault === true) ?? null
+  }
+
+  /**
+   * Set a host as the default host
+   * This clears isDefault flag on all other hosts
+   *
+   * @param hostId - The host ID to set as default
+   * @throws Error if hostId does not exist
+   */
+  async setDefaultHost(hostId: string): Promise<void> {
+    const hosts = await this.loadState<HostState[]>("hosts.json")
+
+    // Validate hostId exists
+    const targetHost = hosts.find(h => h.id === hostId)
+    if (!targetHost) {
+      throw new Error(
+        `Cannot set default host: host with ID "${hostId}" not found. ` +
+        `Available hosts: ${hosts.map(h => h.id).join(", ") || "none"}`
+      )
+    }
+
+    // Clear isDefault on all hosts, set on the target
+    for (const host of hosts) {
+      host.isDefault = host.id === hostId
+    }
+
+    await this.saveState("hosts.json", hosts)
+  }
+
+  /**
+   * Clear the default host (switch to local mode)
+   */
+  async clearDefaultHost(): Promise<void> {
+    const hosts = await this.loadState<HostState[]>("hosts.json")
+
+    for (const host of hosts) {
+      host.isDefault = false
+    }
+
+    await this.saveState("hosts.json", hosts)
+  }
+
+  /**
+   * Get execution mode derived from default host
+   * Returns "remote" if a default host exists, "local" otherwise
+   */
+  async getExecutionMode(): Promise<"local" | "remote"> {
+    const defaultHost = await this.getDefaultHost()
+    return defaultHost ? "remote" : "local"
+  }
+
+  /**
+   * Get SSH config from the default host
+   * Returns null if no default host or missing required fields
+   */
+  async getRemoteConfig(): Promise<{
+    host: string
+    user: string
+    password?: string
+    port: number
+    sudoPasswd?: string
+  } | null> {
+    const defaultHost = await this.getDefaultHost()
+
+    if (!defaultHost?.host || !defaultHost?.user) {
+      return null
+    }
+
+    return {
+      host: defaultHost.host,
+      user: defaultHost.user,
+      password: defaultHost.password,
+      port: defaultHost.port || 22,
+      sudoPasswd: defaultHost.sudoPasswd,
+    }
+  }
+
+  // ============================================================================
   // Operation Management
   // ============================================================================
 
-  async startOperation(intent: Intent, params: Record<string, unknown>): Promise<string> {
+  /**
+   * Start a new operation
+   *
+   * @param intent Operation intent
+   * @param params Operation parameters (may include trace info)
+   * @param trace Optional trace payload for distributed tracing
+   */
+  async startOperation(
+    intent: Intent,
+    params: Record<string, unknown>,
+    trace?: {
+      traceId: string
+      parentSpanId?: string
+      sourceService?: string
+    }
+  ): Promise<string> {
     const operations = await this.loadState<Operation[]>("operations.json")
 
     const id = generateId("op")
@@ -452,6 +596,9 @@ export class StateManager {
 
     const operation: Operation = {
       id,
+      traceId: trace?.traceId,
+      parentSpanId: trace?.parentSpanId,
+      sourceService: trace?.sourceService,
       type: mapIntentToType(intent),
       intent,
       operationKey,  // 持久化！
@@ -626,13 +773,27 @@ export class StateManager {
   // Job Progress
   // ============================================================================
 
-  async startJob(operationId: string, totalSteps: number, hostId?: string): Promise<string> {
+  /**
+   * Start a new job for progress tracking
+   *
+   * @param operationId Associated operation ID
+   * @param totalSteps Total number of steps in the job
+   * @param hostId Optional host ID for context-builder relevance sorting
+   * @param traceId Optional trace ID for distributed tracing
+   */
+  async startJob(
+    operationId: string,
+    totalSteps: number,
+    hostId?: string,
+    traceId?: string
+  ): Promise<string> {
     const jobs = await this.loadState<Job[]>("jobs.json")
 
     const id = generateId("job")
     const job: Job = {
       id,
       operationId,
+      traceId,
       hostId,  // 持久化关联的 host
       status: "running",
       progress: {
@@ -672,6 +833,39 @@ export class StateManager {
       job.progress.percentage = success ? 100 : job.progress.percentage
       await this.saveState("jobs.json", jobs)
     }
+  }
+
+  /**
+   * Get job by operation ID
+   */
+  async getJobByOperationId(operationId: string): Promise<Job | null> {
+    const jobs = await this.loadState<Job[]>("jobs.json")
+    return jobs.find(j => j.operationId === operationId) ?? null
+  }
+
+  /**
+   * Resume an operation - mark it as running again
+   * Used when resuming a paused/interrupted operation
+   */
+  async resumeOperation(operationId: string): Promise<boolean> {
+    const operations = await this.loadState<Operation[]>("operations.json")
+    const op = operations.find(o => o.id === operationId)
+
+    if (!op) {
+      return false
+    }
+
+    // Check if operation is in a resumable state
+    const resumableStatuses = ["paused", "awaiting_input", "interrupted"]
+    if (!resumableStatuses.includes(op.execution.status)) {
+      return false
+    }
+
+    // Update status to running
+    op.execution.status = "running"
+    await this.saveState("operations.json", operations)
+
+    return true
   }
 
   // ============================================================================
@@ -877,7 +1071,17 @@ export class StateManager {
     const filePath = path.join(this.stateDir, file)
     const tempPath = `${filePath}.tmp`
 
+    // Write with restrictive permissions for sensitive files
+    // hosts.json contains passwords - should be 600 (owner read/write only)
+    const isSensitiveFile = file === "hosts.json"
+
     await fs.promises.writeFile(tempPath, JSON.stringify(data, null, 2))
+
+    // Set file permissions before rename (works on Linux)
+    if (isSensitiveFile) {
+      await fs.promises.chmod(tempPath, 0o600) // Owner read/write only
+    }
+
     await fs.promises.rename(tempPath, filePath)
   }
 

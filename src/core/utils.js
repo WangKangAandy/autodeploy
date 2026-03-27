@@ -100,6 +100,65 @@ function formatToolError(error, context) {
   });
 }
 
+/**
+ * Sensitive field names that should never be logged or returned in tool output
+ */
+const SENSITIVE_FIELDS = ["password", "sudoPasswd", "sshPassword", "apiKey", "secret"];
+
+/**
+ * Sanitize object by replacing sensitive field values with "***"
+ * Used for logging and tool output to prevent credential exposure
+ *
+ * @param {Object} obj - Object to sanitize
+ * @param {string[]} additionalFields - Additional field names to sanitize
+ * @returns {Object} Sanitized copy of the object
+ */
+function sanitizeSensitive(obj, additionalFields = []) {
+  if (!obj || typeof obj !== "object") return obj;
+
+  const allSensitiveFields = [...SENSITIVE_FIELDS, ...additionalFields];
+  const sanitized = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (allSensitiveFields.includes(key)) {
+      sanitized[key] = "***";
+    } else if (value && typeof value === "object") {
+      sanitized[key] = sanitizeSensitive(value, additionalFields);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+/**
+ * Sanitize string by replacing sensitive patterns
+ * Useful for sanitizing log messages or command output
+ *
+ * @param {string} str - String to sanitize
+ * @returns {string} Sanitized string
+ */
+function sanitizeString(str) {
+  if (!str || typeof str !== "string") return str;
+
+  // Replace password patterns like password='xxx' or password: "xxx"
+  let sanitized = str;
+  for (const field of SENSITIVE_FIELDS) {
+    // Match patterns: field='value', field: "value", field=value
+    const patterns = [
+      new RegExp(`${field}=['"][^'"]*['"]`, "gi"),
+      new RegExp(`${field}\\s*:\\s*["'][^"']*["']`, "gi"),
+      new RegExp(`${field}=\\S+`, "gi"),
+    ];
+    for (const pattern of patterns) {
+      sanitized = sanitized.replace(pattern, `${field}=***`);
+    }
+  }
+
+  return sanitized;
+}
+
 module.exports = {
   escapeSingleQuotes,
   escapeDoubleQuotes,
@@ -110,4 +169,7 @@ module.exports = {
   formatOutput,
   formatToolResult,
   formatToolError,
+  sanitizeSensitive,
+  sanitizeString,
+  SENSITIVE_FIELDS,
 };

@@ -3,12 +3,118 @@
 const { execLocal, execLocalDocker } = require("./local-exec");
 const { execRemote, execRemoteDocker, syncFiles } = require("./ssh-client");
 
-// Runtime execution mode (set dynamically by skills)
-let currentMode = "local";
-let remoteConfig = null;
+// ============================================================================
+// Executor State
+// ============================================================================
+
+/**
+ * Executor is stateless - it derives mode from StateManager.
+ * StateManager is the single source of truth for connection state.
+ */
+
+let stateManager = null;      // StateManager reference (injected at init)
+let cachedMode = "local";     // Runtime cache (refreshed before each request)
+let cachedRemoteConfig = null; // Runtime cache for remote config
+
+// ============================================================================
+// Initialization
+// ============================================================================
+
+/**
+ * Initialize executor with StateManager reference
+ * Called by plugin entry point (index.js)
+ *
+ * @param {Object} sm - StateManager instance
+ */
+function init(sm) {
+  stateManager = sm;
+}
+
+/**
+ * Refresh cache from StateManager
+ * Called at the start of each request (before_prompt_build hook)
+ *
+ * This ensures executor always uses the latest state from StateManager.
+ *
+ * @throws Error if StateManager is not available and no cache exists
+ */
+async function refreshCache() {
+  if (!stateManager) {
+    // No StateManager available
+    // Only allow local mode to continue (no remote dependency)
+    // Remote mode MUST fail because we cannot verify state consistency
+    if (cachedMode === "remote") {
+      throw new Error(
+        "StateManager not available while in remote mode. " +
+        "Cannot safely use cached remote config without state verification. " +
+        "Please ensure StateManager is initialized or switch to local mode."
+      );
+    }
+
+    // Local mode: safe to continue or initialize
+    if (!cachedMode) {
+      cachedMode = "local";
+      cachedRemoteConfig = null;
+    }
+    console.warn("[executor] StateManager not available, using local mode");
+    return;
+  }
+
+  try {
+    // Step 1: Get execution mode from StateManager (single source of truth)
+    const mode = await stateManager.getExecutionMode();
+
+    if (mode === "remote") {
+      // Step 2: Get remote config for remote mode
+      const remoteConfig = await stateManager.getRemoteConfig();
+
+      if (remoteConfig && remoteConfig.host && remoteConfig.user) {
+        cachedMode = "remote";
+        cachedRemoteConfig = remoteConfig;
+      } else {
+        // Mode says remote but config is incomplete - this is an error state
+        throw new Error(
+          "Execution mode is 'remote' but remote config is incomplete or missing. " +
+          "Please reconfigure remote mode with musa_set_mode."
+        );
+      }
+    } else {
+      // Local mode
+      cachedMode = "local";
+      cachedRemoteConfig = null;
+    }
+  } catch (err) {
+    // Failure strategy:
+    // - Local mode cache: can continue with local (no remote dependency)
+    // - Remote mode cache: MUST fail - cannot safely use stale remote config
+    //   because StateManager may have changed/corrupted/deleted host state
+    //   and we don't want to execute with inconsistent state
+    if (cachedMode === "local") {
+      console.error("[executor] Failed to refresh cache from StateManager:", err.message);
+      console.warn("[executor] Keeping local mode cache (no remote dependency)");
+      return;
+    }
+
+    // Remote mode: propagate error to force user to reconfigure
+    // This prevents "execution state inconsistent with persisted state"
+    console.error("[executor] Failed to refresh remote config from StateManager:", err.message);
+    throw new Error(
+      "Remote mode refresh failed: " + err.message + ". " +
+      "Please reconfigure remote mode with musa_set_mode or switch to local mode."
+    );
+  }
+}
+
+// ============================================================================
+// Mode Management
+// ============================================================================
 
 /**
  * Set deployment mode
+ *
+ * DEPRECATED: This function is kept for backward compatibility.
+ * The actual state is managed by StateManager.
+ * Use stateManager.setDefaultHost() / clearDefaultHost() instead.
  *
  * @param {string} mode - 'local' or 'remote'
  * @param {Object|null} config - SSH configuration for remote mode
@@ -17,8 +123,11 @@ function setMode(mode, config = null) {
   if (mode !== "local" && mode !== "remote") {
     throw new Error(`Invalid mode: ${mode}. Must be 'local' or 'remote'.`);
   }
-  currentMode = mode;
-  remoteConfig = config;
+
+  // Update cache directly (for immediate use)
+  // The caller should also update StateManager for persistence
+  cachedMode = mode;
+  cachedRemoteConfig = config;
 }
 
 /**
@@ -27,7 +136,7 @@ function setMode(mode, config = null) {
  * @returns {string} Current mode ('local' or 'remote')
  */
 function getMode() {
-  return currentMode;
+  return cachedMode;
 }
 
 /**
@@ -36,7 +145,7 @@ function getMode() {
  * @returns {Object|null} Remote configuration or null if in local mode
  */
 function getRemoteConfig() {
-  return remoteConfig;
+  return cachedRemoteConfig;
 }
 
 /**
@@ -46,12 +155,27 @@ function getRemoteConfig() {
  */
 function isRemoteReady() {
   return (
-    currentMode === "remote" &&
-    remoteConfig &&
-    remoteConfig.host &&
-    remoteConfig.user &&
-    remoteConfig.password
+    cachedMode === "remote" &&
+    cachedRemoteConfig &&
+    cachedRemoteConfig.host &&
+    cachedRemoteConfig.user
   );
+}
+
+// ============================================================================
+// Execution Functions
+// ============================================================================
+
+/**
+ * Ensure cache is synchronized before execution
+ * This is called at the start of every execute* function
+ */
+async function ensureCacheSynced() {
+  // If we have a StateManager, refresh cache before execution
+  // This ensures we always use the latest persisted state
+  if (stateManager) {
+    await refreshCache();
+  }
 }
 
 /**
@@ -62,13 +186,16 @@ function isRemoteReady() {
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
  */
 async function execute(command, options = {}) {
-  if (currentMode === "remote") {
+  // Ensure cache is synced before execution
+  await ensureCacheSynced();
+
+  if (cachedMode === "remote") {
     if (!isRemoteReady()) {
       throw new Error(
         "Remote mode selected but no connection info provided. Use musa_set_mode to configure remote connection."
       );
     }
-    return execRemote(remoteConfig, command, options);
+    return execRemote(cachedRemoteConfig, command, options);
   }
   return execLocal(command, options);
 }
@@ -80,17 +207,20 @@ async function execute(command, options = {}) {
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
  */
 async function executeDocker(args) {
-  if (currentMode === "remote") {
+  // Ensure cache is synced before execution
+  await ensureCacheSynced();
+
+  if (cachedMode === "remote") {
     if (!isRemoteReady()) {
       throw new Error(
         "Remote mode selected but no connection info provided. Use musa_set_mode to configure remote connection."
       );
     }
     // Add sudoPasswd from config if available
-    if (remoteConfig.sudoPasswd && !args.sudoPasswd) {
-      args.sudoPasswd = remoteConfig.sudoPasswd;
+    if (cachedRemoteConfig.sudoPasswd && !args.sudoPasswd) {
+      args.sudoPasswd = cachedRemoteConfig.sudoPasswd;
     }
-    return execRemoteDocker(remoteConfig, args);
+    return execRemoteDocker(cachedRemoteConfig, args);
   }
   return execLocalDocker(args);
 }
@@ -102,7 +232,10 @@ async function executeDocker(args) {
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
  */
 async function executeSync(args) {
-  if (currentMode === "local") {
+  // Ensure cache is synced before execution
+  await ensureCacheSynced();
+
+  if (cachedMode === "local") {
     // For local mode, use cp command instead
     const { execLocal } = require("./local-exec");
     const src =
@@ -117,10 +250,16 @@ async function executeSync(args) {
       "Remote mode selected but no connection info provided. Use musa_set_mode to configure remote connection."
     );
   }
-  return syncFiles(remoteConfig, args);
+  return syncFiles(cachedRemoteConfig, args);
 }
 
+// ============================================================================
+// Exports
+// ============================================================================
+
 module.exports = {
+  init,
+  refreshCache,
   setMode,
   getMode,
   getRemoteConfig,
