@@ -19,6 +19,15 @@ import {
   type DispatchError,
 } from "./error-normalizer.js"
 import { INTENT_RISK } from "./permission-gate.js"
+import { getResumePoint } from "./orchestrator.js"
+import {
+  type TracePayload,
+  generateTraceId,
+  startSpan,
+  finishSpan,
+} from "../shared/trace.js"
+import { createLogger } from "../shared/logger.js"
+import { getLarkTicket, type LarkTicket } from "../shared/lark-ticket.js"
 
 /**
  * Total steps per intent for job progress tracking
@@ -34,6 +43,25 @@ export { routeToHandler, type RouteResult } from "./router"
 export { runPreFlightCheck, type CheckResult } from "./pre-check"
 export { checkPermission, type PermissionResult } from "./permission-gate"
 export { normalizeError, formatDispatchError, type DispatchError } from "./error-normalizer"
+export {
+  getOrchestration,
+  executeOrchestration,
+  getResumePoint,
+  type ResumePoint,
+  formatOrchestrationSummary,
+  type Orchestration,
+  type OrchestrationStep,
+  type OrchestrationResult,
+} from "./orchestrator"
+export {
+  getSkillMeta,
+  getSkillPath,
+  getSkillCategory,
+  canCallSkill,
+  isMetaSkill,
+  isUserExposed,
+  type SkillMeta,
+} from "./skill-registry"
 
 /**
  * 可 resume 的状态
@@ -94,7 +122,9 @@ async function isResumeReady(
  */
 export interface DispatchParams {
   intent: Intent
-  context?: Record<string, unknown>
+  context?: Record<string, unknown> & {
+    trace?: TracePayload  // Unified trace payload for distributed tracing
+  }
   action?: "start" | "status" | "resume" | "cancel"
   force?: boolean
   query?: string // For auto intent parsing
@@ -138,6 +168,11 @@ Use this as the primary entry point for all MUSA-related operations.
 - sync: Sync files between hosts
 - run_container: Run Docker container
 - execute_document: Execute deployment from document (parse, plan, execute)
+- prepare_model: Download and prepare model files from HuggingFace/ModelScope
+- prepare_dataset: Download and prepare dataset files
+- prepare_package: Download and prepare MUSA packages (driver, toolkit, SDK)
+- manage_images: Manage Docker container images (pull, push, export, import)
+- prepare_repo: Clone and prepare code repositories
 - auto: Auto-detect intent from query`,
 
     parameters: {
@@ -145,7 +180,7 @@ Use this as the primary entry point for all MUSA-related operations.
       properties: {
         intent: {
           type: "string",
-          enum: ["deploy_env", "update_driver", "gpu_status", "run_container", "validate", "sync", "execute_document", "auto"],
+          enum: ["deploy_env", "update_driver", "gpu_status", "run_container", "validate", "sync", "execute_document", "prepare_model", "prepare_dataset", "prepare_package", "manage_images", "prepare_repo", "auto"],
           description: "Operation intent",
         },
         context: {
@@ -342,7 +377,94 @@ export async function dispatch(
     }
 
     // Resume is valid, continue with existing operation
-    // Note: operationId will be set from existing operation
+    // Use existing operation ID and get resume point
+    if (action === "resume") {
+      const operationIdParam = context.operationId as string
+
+      // Step 1: Get resume point for orchestration (before modifying state)
+      const resumePoint = await getResumePoint(stateManager, operationIdParam)
+
+      // Step 2: Get associated job for tracking (before modifying state)
+      const job = await stateManager.getJobByOperationId(operationIdParam)
+
+      // Step 3: Validate routing first (before modifying state)
+      const route = await routeToHandler({
+        intent: resolvedIntent,
+        context: {
+          ...context,
+          resume: true,
+          resumePoint: resumePoint ? {
+            metaSkillId: resumePoint.metaSkillId,
+            fromStep: resumePoint.fromStep,
+            savedContext: resumePoint.context,
+          } : undefined,
+        },
+        action: "resume",
+        stateManager,
+      })
+
+      // If routing failed, return error without modifying operation state
+      if (route.type === "error") {
+        return {
+          success: false,
+          intent: resolvedIntent,
+          action: "resume",
+          route,
+          precheck,
+          permission,
+          operationId: operationIdParam,
+          jobId: job?.id ?? null,
+          error: {
+            code: "EXECUTION_ERROR",
+            intent: resolvedIntent,
+            step: "routing",
+            originalError: route.message,
+            guidance: "Check the error and retry.",
+            recoverable: true,
+          },
+          guidance: buildGuidance(route, resolvedIntent, "resume"),
+        }
+      }
+
+      // Step 4: Routing validated, now resume the operation through state manager
+      const resumed = await stateManager.resumeOperation(operationIdParam)
+      if (!resumed) {
+        // Routing succeeded but state transition failed - this is a system error
+        return {
+          success: false,
+          intent: resolvedIntent,
+          action: "resume",
+          route,
+          precheck,
+          permission,
+          operationId: operationIdParam,
+          jobId: job?.id ?? null,
+          error: {
+            code: "RESUME_FAILED",
+            intent: resolvedIntent,
+            step: "resume_lifecycle",
+            originalError: "Failed to resume operation through state manager",
+            guidance: "The operation may not be in a resumable state. The routing was validated but the state transition failed.",
+            recoverable: true,
+          },
+          guidance: "Failed to resume operation. It may not be in a resumable state.",
+        }
+      }
+
+      // Success: operation resumed and routing validated
+      return {
+        success: true,
+        intent: resolvedIntent,
+        action: "resume",
+        route,
+        precheck,
+        permission,
+        operationId: operationIdParam,
+        jobId: job?.id ?? null,
+        error: null,
+        guidance: buildGuidance(route, resolvedIntent, "resume"),
+      }
+    }
   }
 
   // 5. Atomic operation start (conflict check + start under lock)
@@ -351,15 +473,59 @@ export async function dispatch(
   let operationId: string | null = null
   let jobId: string | null = null
 
+  // Trace handling
+  const trace = context.trace
+  const logger = createLogger("dispatcher")
+
+  // Try to get LarkTicket from openclaw-lark (AsyncLocalStorage propagation)
+  const larkTicket = getLarkTicket()
+
+  // Trace inheritance rules (enforced constraint):
+  // 1. LarkTicket available (Feishu entry): Use messageId as traceId
+  // 2. Main chain call (platform/Claude entry): MUST inherit upstream trace, forbidden to regenerate
+  // 3. Independent entry (CLI/API direct call): Allowed to create new trace
+  //
+  // Code-level constraint: trace?.traceId or larkTicket?.messageId exists MUST be used
+  // Violating this rule should be treated as a bug
+  let traceId: string
+  if (larkTicket?.messageId) {
+    // Feishu entry via openclaw-lark: use messageId as traceId
+    traceId = larkTicket.messageId
+    logger.debug("Using LarkTicket messageId as traceId", { traceId, chatId: larkTicket.chatId })
+  } else if (trace?.traceId) {
+    // Main chain: force inherit
+    traceId = trace.traceId
+    logger.debug("Inheriting upstream trace", { traceId })
+  } else {
+    // Independent entry: allowed to create new (but log warning for audit)
+    traceId = generateTraceId()
+    logger.warn("No upstream trace, generating new traceId (standalone entry only)", { traceId })
+  }
+
+  // Create span for dispatch
+  const span = startSpan("dispatch", { intent: resolvedIntent })
+
   try {
     const enrichedContext = { ...context, hostId }
 
+    // Prepare trace info for operation
+    const traceInfo = {
+      traceId,
+      parentSpanId: trace?.parentSpanId,
+      sourceService: larkTicket ? "feishu-bridge" : trace?.sourceService,
+    }
+
     if (isDestructive && action === "start") {
       // Atomic: conflict check + start under global lock
-      const result = await stateManager.startOperationIfNoConflict(resolvedIntent, enrichedContext)
+      const result = await stateManager.startOperationIfNoConflict(
+        resolvedIntent,
+        enrichedContext,
+        traceInfo
+      )
 
       if (!result.started) {
         const error = operationConflictError(resolvedIntent, hostId, result.conflict!.id)
+        finishSpan(span, "error", { code: "OPERATION_CONFLICT", message: error.guidance })
         return {
           success: false,
           intent: resolvedIntent,
@@ -377,14 +543,17 @@ export async function dispatch(
       operationId = result.operationId!
     } else {
       // Non-destructive or non-start action: simple start without conflict check
-      operationId = await stateManager.startOperation(resolvedIntent, enrichedContext)
+      operationId = await stateManager.startOperation(resolvedIntent, enrichedContext, traceInfo)
     }
+
+    // Log dispatch started with trace
+    logger.info("Dispatch started", { traceId, operationId, intent: resolvedIntent })
 
     // 5.5 Start job tracking for destructive operations
     // Job tracks progress steps, used by context-builder for relevance sorting
     if (isDestructive && action === "start") {
       const totalSteps = INTENT_TOTAL_STEPS[resolvedIntent] || 0
-      jobId = await stateManager.startJob(operationId, totalSteps, hostId)
+      jobId = await stateManager.startJob(operationId, totalSteps, hostId, traceId)
     }
 
     // 6. Route to handler
@@ -396,6 +565,12 @@ export async function dispatch(
     })
 
     // 7. Return route result (actual execution is delegated to skills/tools)
+    if (route.type !== "error") {
+      finishSpan(span, "ok")
+    } else {
+      finishSpan(span, "error", { code: "ROUTING_ERROR", message: route.message })
+    }
+
     return {
       success: route.type !== "error",
       intent: resolvedIntent,
@@ -420,6 +595,7 @@ export async function dispatch(
   } catch (err) {
     // Error handling
     const error = normalizeError(err, resolvedIntent, "dispatch")
+    finishSpan(span, "error", { code: "DISPATCH_ERROR", message: error.originalError })
 
     if (operationId) {
       await stateManager.completeOperation(operationId, {
@@ -458,11 +634,33 @@ function buildGuidance(route: RouteResult, intent: Intent, action: string): stri
   lines.push(`**Target**: ${route.target}`)
   lines.push("")
 
-  if (route.type === "skill") {
+  if (route.type === "orchestration") {
+    lines.push("### Orchestration Execution")
+    lines.push("")
+    lines.push(route.message)
+    if (route.orchestration) {
+      lines.push("")
+      lines.push(`**Meta Skill**: ${route.orchestration.metaSkillId}`)
+      lines.push(`**Steps**: ${route.orchestration.steps.length} atomic skills`)
+      lines.push("")
+      lines.push("The orchestrator will execute each atomic skill in sequence.")
+      lines.push("Progress will be tracked in the operation state.")
+    }
+    if (route.skillMeta) {
+      lines.push("")
+      lines.push(`**Kind**: ${route.skillMeta.kind}`)
+      lines.push(`**Exposure**: ${route.skillMeta.exposure}`)
+    }
+  } else if (route.type === "skill") {
     lines.push("### Next Steps")
     lines.push("")
     lines.push("Follow the skill workflow at the path above.")
     lines.push("The skill will guide you through the deployment process.")
+    if (route.skillMeta) {
+      lines.push("")
+      lines.push(`**Kind**: ${route.skillMeta.kind}`)
+      lines.push(`**Exposure**: ${route.skillMeta.exposure}`)
+    }
   } else if (route.type === "tool") {
     lines.push("### Next Steps")
     lines.push("")
