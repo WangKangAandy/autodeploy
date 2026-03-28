@@ -5,22 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- `agent-tools/` - Unified tool layer for Claude Code, OpenCode, and Feishu bot
+- `agent-tools/` - Unified tool layer for Claude Code and other agent frameworks
 - `agent-tools/src/core/` - Core executors (execRemote, execDocker, syncFiles)
-- `feishu-claude-bridge/src/tool-client.ts` - ToolClient for agent-tools integration
-- `feishu-claude-bridge/src/system-prompt.ts` - Context-aware system prompt generator
-- `feishu-claude-bridge/src/skill-loader.ts` - Dynamic skill loading from repository
+- Platform runtime layer with unified dispatcher and state management
 
 ### Changed
 - Renamed `claude-remote-mt-gpu-tools/` to `agent-tools/`
 - Updated `agent-tools/package.json` with proper exports for multi-entry usage
 - Updated `agent-tools/tsconfig.json` to use `module: NodeNext`
 - Refactored MCP tools to use core executors layer
-- Enhanced Feishu bot system prompt with skills integration and tool guidance
 
 ### Removed
 - `.opencode/tools/` - Migrated to `agent-tools/src/core/`
-- Redundant documentation files in `feishu-claude-bridge/`
+- `feishu-claude-bridge/` - Removed from repository (not part of core platform scope)
 
 ### Fixed
 - Updated all documentation to reflect new architecture

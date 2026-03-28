@@ -4,7 +4,7 @@ Unified tool layer for AI agents to execute commands on Remote MT-GPU Machines v
 
 This package provides:
 - **MCP Server** for Claude Code CLI integration
-- **Core executors** for direct import by OpenCode and Feishu bot
+- **Core executors** for direct import by other AI agent frameworks
 - **Three remote tools**: remote-exec, remote-docker, remote-sync
 
 ## Features
@@ -20,10 +20,10 @@ This package provides:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     Entry Points                        │
-├───────────────┬───────────────┬─────────────────────────┤
-│ Claude Code   │   OpenCode    │     Feishu Bot          │
-│  (MCP Proto)  │   (import)    │     (import)            │
-└───────┬───────┴───────┬───────┴───────────┬─────────────┘
+├───────────────┬─────────────────────────────────────────┤
+│ Claude Code   │   Other Agent Frameworks               │
+│  (MCP Proto)  │   (Direct Import)                      │
+└───────┬───────┴─────────────────────────────────────────┘
         │               │                   │
         ▼               ▼                   ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -79,7 +79,7 @@ Configure Claude Code to use the MCP server:
 }
 ```
 
-### 2. OpenCode / Feishu Bot (Direct Import)
+### 2. Direct Import
 
 ```typescript
 import {
@@ -115,10 +115,6 @@ await syncFiles(config, {
   direction: "push",
 })
 ```
-
-### 3. Feishu Bot Integration
-
-See `feishu-claude-bridge/src/tool-client.ts` for a complete wrapper implementation.
 
 ## Configuration
 
