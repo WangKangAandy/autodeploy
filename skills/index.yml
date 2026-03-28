@@ -1,13 +1,59 @@
 # Skills Index
 # This file provides a machine-readable index of all available skills in this repository.
 # Agents can use this to discover and match user intents to appropriate skills.
+#
+# Field Specification:
+# --------------------
+# id              : string - Unique identifier (required)
+# name            : string - Display name (required)
+# path            : string - Relative path to SKILL.md from skills/ directory (required)
+# description     : string - Brief description of what the skill does (required)
+# category        : enum - Directory classification: env | assets | workload | benchmark | migration (required)
+# kind            : enum - Execution granularity: atomic | meta (required)
+# exposure        : enum - Visibility: user | internal (required)
+# execution_mode  : enum - Execution environment: local | remote | container | mixed (required)
+# dispatch_intent : string - Dispatcher intent for routing (optional, for user-exposed skills)
+# dispatch_entry  : string - Dispatcher entry call (optional, for user-exposed skills)
+# risk_level      : enum - Operation risk: safe | destructive | idempotent (required)
+# triggers        : string[] - Keywords for intent matching (optional)
+# inputs          : object - Input parameters with required/optional arrays (required)
+# outputs         : string[] - Expected outputs (required)
+# depends_on      : string[] - IDs of skills this skill depends on (optional)
+#
+# Category Definitions:
+# ---------------------
+# env       : Infrastructure deployment and environment configuration
+# assets    : Host packages, models, datasets, and dependency repos preparation
+# workload  : Training/inference workload execution
+# benchmark : Performance validation (Phase 3)
+# migration : CUDA to MUSA migration (Phase 3)
+#
+# Kind Definitions:
+# -----------------
+# atomic : Standalone skill that performs a single unit of work
+# meta   : Composite skill that orchestrates other skills
+#
+# Exposure Definitions:
+# ---------------------
+# user     : Direct user-facing entry point
+# internal : Called by other skills, not directly by users
 
 skills:
+  # =============================================================================
+  # Environment Skills (env/)
+  # =============================================================================
+
   - id: deploy_musa_base_env
     name: deploy_musa_base_env
-    path: deploy_musa_base_env/SKILL.md
-    description: Complete MUSA environment deployment from dependencies to container validation
-    category: deployment
+    path: env/deploy_musa_base_env/SKILL.md
+    description: Complete MUSA environment deployment orchestrating atomic skills
+    category: env
+    kind: meta
+    exposure: user
+    execution_mode: mixed
+    dispatch_intent: deploy_env
+    dispatch_entry: 'musa_dispatch(intent="deploy_env")'
+    risk_level: destructive
     triggers:
       - deploy MUSA environment
       - install MUSA SDK
@@ -28,12 +74,24 @@ skills:
       - driver installed and loaded
       - container toolkit bound to Docker
       - validation container running
+    depends_on:
+      - ensure_system_dependencies
+      - ensure_musa_driver
+      - ensure_mt_container_toolkit
+      - manage_container_images
+      - validate_musa_container_environment
 
   - id: update_musa_driver
     name: update_musa_driver
-    path: update_musa_driver/SKILL.md
+    path: env/update_musa_driver/SKILL.md
     description: Targeted MUSA driver update or reinstall without full environment deployment
-    category: maintenance
+    category: env
+    kind: meta
+    exposure: user
+    execution_mode: mixed
+    dispatch_intent: update_driver
+    dispatch_entry: 'musa_dispatch(intent="update_driver")'
+    risk_level: destructive
     triggers:
       - update driver
       - upgrade driver
@@ -55,8 +113,231 @@ skills:
     outputs:
       - state file: .musa_driver_update_state.json
       - new driver installed and loaded
+    depends_on:
+      - ensure_musa_driver
 
-# Reference documents (not executable skills, but important for agent context)
+  # -----------------------------------------------------------------------------
+  # Atomic Environment Skills
+  # -----------------------------------------------------------------------------
+
+  - id: ensure_system_dependencies
+    name: ensure_system_dependencies
+    path: env/ensure_system_dependencies/SKILL.md
+    description: Ensure system dependencies are installed (build-essential, dkms, etc.)
+    category: env
+    kind: atomic
+    exposure: internal
+    execution_mode: mixed
+    risk_level: destructive
+    inputs:
+      required: []
+      optional:
+        - mode  # full | check_and_fix
+    outputs:
+      - installed packages list
+      - missing packages list (before installation)
+      - installation result
+
+  - id: ensure_musa_driver
+    name: ensure_musa_driver
+    path: env/ensure_musa_driver/SKILL.md
+    description: Ensure MUSA driver is in the target state (install/update/verify)
+    category: env
+    kind: atomic
+    exposure: internal
+    execution_mode: mixed
+    risk_level: destructive
+    inputs:
+      required:
+        - MT_GPU_DRIVER_VERSION
+      optional:
+        - MUSA_SDK_VERSION
+    outputs:
+      - driver version (before and after)
+      - mthreads-gmi output
+
+  - id: ensure_mt_container_toolkit
+    name: ensure_mt_container_toolkit
+    path: env/ensure_mt_container_toolkit/SKILL.md
+    description: Ensure MT container toolkit is installed and bound to Docker
+    category: env
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    risk_level: idempotent
+    triggers:
+      - install container toolkit
+      - update container toolkit
+      - bind MUSA runtime
+      - reinstall container toolkit
+      - 安装容器工具包
+      - 更新容器工具包
+    inputs:
+      required: []
+      optional:
+        - TOOLKIT_VERSION
+    outputs:
+      - installation status
+      - Docker binding status
+      - validation result
+
+  - id: manage_container_images
+    name: manage_container_images
+    path: assets/manage_container_images/SKILL.md
+    description: Manage container images (pull, push, export, import, list, remove)
+    category: assets
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    risk_level: idempotent
+    triggers:
+      - pull image
+      - push image
+      - docker pull
+      - docker push
+      - export image
+      - import image
+      - list images
+      - remove image
+      - 拉取镜像
+      - 推送镜像
+      - 导出镜像
+      - 镜像管理
+    inputs:
+      required:
+        - action  # pull | push | export | import | list | remove
+      optional:
+        - image
+        - registry
+        - outputPath
+        - inputPath
+        - force
+        - filter
+    outputs:
+      - action result
+      - image info
+      - duration
+
+  - id: validate_musa_container_environment
+    name: validate_musa_container_environment
+    path: env/validate_musa_container_environment/SKILL.md
+    description: Validate MUSA environment inside container (musaInfo, torch.musa, tensor ops, GPU memory)
+    category: env
+    kind: atomic
+    exposure: internal
+    execution_mode: mixed
+    risk_level: safe
+    inputs:
+      required:
+        - DOCKER_IMAGE
+      optional:
+        - CONTAINER_NAME
+    outputs:
+      - musaInfoPassed
+      - torchMusaAvailable
+      - tensorTestPassed
+      - gpuMemoryGB
+
+  # =============================================================================
+  # Assets Skills (assets/)
+  # =============================================================================
+
+  - id: prepare_musa_package
+    name: prepare_musa_package
+    path: assets/prepare_musa_package/SKILL.md
+    description: Discover/download/verify MUSA packages (driver, toolkit, SDK)
+    category: assets
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    dispatch_intent: prepare_package
+    dispatch_entry: 'musa_dispatch(intent="prepare_package")'
+    risk_level: idempotent
+    inputs:
+      required:
+        - PACKAGE_TYPE  # driver | toolkit | sdk
+        - VERSION
+      optional:
+        - SOURCE  # moss | local | mirror
+    outputs:
+      - status: found | downloaded | missing | failed
+      - resolvedPath
+      - source
+      - integrity
+
+  - id: prepare_model_artifacts
+    name: prepare_model_artifacts
+    path: assets/prepare_model_artifacts/SKILL.md
+    description: Discover/download/verify model files
+    category: assets
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    dispatch_intent: prepare_model
+    dispatch_entry: 'musa_dispatch(intent="prepare_model")'
+    risk_level: idempotent
+    inputs:
+      required:
+        - MODEL_NAME
+      optional:
+        - MODEL_PATH
+        - MODEL_SOURCE
+    outputs:
+      - status: found | downloaded | missing | failed
+      - resolvedPath
+      - source
+      - size
+
+  - id: prepare_dataset_artifacts
+    name: prepare_dataset_artifacts
+    path: assets/prepare_dataset_artifacts/SKILL.md
+    description: Discover/download/verify dataset files
+    category: assets
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    dispatch_intent: prepare_dataset
+    dispatch_entry: 'musa_dispatch(intent="prepare_dataset")'
+    risk_level: idempotent
+    inputs:
+      required:
+        - DATASET_NAME
+      optional:
+        - DATASET_PATH
+        - DATASET_SOURCE
+    outputs:
+      - status: found | downloaded | missing | failed
+      - resolvedPath
+      - source
+      - size
+
+  - id: prepare_dependency_repo
+    name: prepare_dependency_repo
+    path: assets/prepare_dependency_repo/SKILL.md
+    description: Clone/update code repository and prepare dependency sources
+    category: assets
+    kind: atomic
+    exposure: user
+    execution_mode: remote
+    dispatch_intent: prepare_repo
+    dispatch_entry: 'musa_dispatch(intent="prepare_repo")'
+    risk_level: idempotent
+    inputs:
+      required:
+        - REPO_URL
+      optional:
+        - REPO_BRANCH
+        - REPO_PATH
+    outputs:
+      - status: cloned | updated | existing | missing | failed
+      - resolvedPath
+      - branch
+      - commit
+
+# =============================================================================
+# Reference Documents (non-executable knowledge resources)
+# =============================================================================
+
 references:
   - path: ../references/moss-download-guide.md
     description: MOSS download and MinIO Client setup guide
@@ -70,10 +351,13 @@ references:
   - path: ../references/remote-execution-policy.md
     description: Source of truth for local vs remote command routing
 
-# Configuration files
+# =============================================================================
+# Configuration Files
+# =============================================================================
+
 configs:
-  - path: deploy_musa_base_env/config/sdk_compatibility.yml
+  - path: config/env/sdk_compatibility.yml
     description: SDK, driver, GPU, and image compatibility mapping
 
-  - path: deploy_musa_base_env/config/container_toolkit.yml
+  - path: config/env/container_toolkit.yml
     description: Container toolkit version and download URLs

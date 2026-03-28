@@ -14,13 +14,8 @@ agent-tools/node_modules/
 agent-tools/config/remote-ssh.env
 agent-tools/dist/
 
-# Feishu Bridge
-feishu-claude-bridge/node_modules/
-feishu-claude-bridge/dist/
-feishu-claude-bridge/config/.env
-feishu-claude-bridge/messages/
-feishu-claude-bridge/responses/
-
 # Root
 package-lock.json
 node_modules/
+dist/
+autodeploy/

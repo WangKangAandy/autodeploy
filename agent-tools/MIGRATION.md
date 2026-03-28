@@ -28,7 +28,7 @@ npm run build
 
 ```bash
 # From your autodeploy repository
-cp /path/to/autodeploy/.opencode/remote-ssh.env config/remote-ssh.env
+cp /path/to/autodeploy/agent-tools/config/remote-ssh.env.example config/remote-ssh.env
 ```
 
 The configuration file format is identical and fully compatible.
@@ -234,7 +234,7 @@ For migration issues:
 2. Verify plugin installation with `npm run build`
 3. Check execution logs in `.claude/remote-exec.log`
 4. Test basic connectivity
-5. Consult main documentation in README.md
+5. Consult main documentation in [INSTALLATION.md](INSTALLATION.md)
 
 ## Summary
 

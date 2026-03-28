@@ -1,0 +1,26 @@
+# MUSA SDK Compatibility Mapping
+# This file defines SDK/driver compatibility and download templates
+
+# Metadata: defaults and download templates
+metadata:
+  moss_alias: sh-moss
+  moss_endpoint: https://sh-moss.mthreads.com
+  # MOSS credentials are read from environment variables:
+  # - MOSS_ACCESS_KEY (or MT_MOSS_ACCESS_KEY)
+  # - MOSS_SECRET_KEY (or MT_MOSS_SECRET_KEY)
+  # If not set, defaults to guest credentials for public packages
+  driver_path_template: "sh-moss/sw-release/musa/external/{sdk_version}/deb/musa_{driver_version}-server_amd64.deb"
+  # Container runtime validation
+  validation_image: registry.mthreads.com/cloud-mirror/ubuntu:20.04
+  validation_command: "mthreads-gmi"
+
+# Compatibility mapping
+compatibility:
+  - sdk_version: "4.3.5"
+    driver_version: "3.3.5"
+    gpu_type: "S5000"
+    gpu_arch: "ph1"
+    os: "Ubuntu"
+    cpu: "Intel"
+    supported_images:
+      - sh-harbor.mthreads.com/mcctest/musa-train:4.3.5_kuae2.1_torch2.9_deb_2026-03-02_ubuntu

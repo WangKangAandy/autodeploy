@@ -6,7 +6,7 @@ This document defines how agents interact with the **Remote MT-GPU Machine** via
 
 ## Architecture
 
-auto-musify operates in a split-machine model:
+openclaw-musa operates in a split-machine model:
 
 - **Machine A (local)** — runs OpenCode, holds the codebase, performs code analysis and editing
 - **Remote MT-GPU Machine** — runs Docker containers with the MUSA SDK for compilation, testing, profiling, and GPU workloads. Accessed from Machine A via SSH — no persistent services required on the GPU side
@@ -98,8 +98,8 @@ Each musifier syncs its own repo independently. All repos share the same contain
 
 The remote tools read credentials from two sources (in order of priority):
 
-1. **Environment variables** (`process.env`) — set before starting OpenCode, or injected by the `remote-ssh` plugin
-2. **Config file** (`.opencode/remote-ssh.env`) — fallback when env vars are not set. Simple `KEY=VALUE` format, one per line. This file is gitignored (contains credentials).
+1. **Environment variables** (`process.env`) — set before starting the agent, or injected by the MCP server
+2. **Config file** (`agent-tools/config/remote-ssh.env`) — fallback when env vars are not set. Simple `KEY=VALUE` format, one per line. This file is gitignored (contains credentials).
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -112,7 +112,7 @@ The remote tools read credentials from two sources (in order of priority):
 
 ### When Credentials Become Available
 
-Credentials are collected by the **director** **upfront** — before any pipeline work begins. The director writes them to `.opencode/remote-ssh.env` and the `remote-ssh` plugin injects these env vars into the shell environment for all subsequent tool calls.
+Credentials are collected by the **director** **upfront** — before any pipeline work begins. The director writes them to `agent-tools/config/remote-ssh.env` and the MCP server loads these env vars for all subsequent tool calls.
 
 **Stage 0** (sdk-version): remote tools are available but typically not needed (version resolution uses GitHub API, Harbor API, local git, and MOSS S3).
 
@@ -137,12 +137,12 @@ Credentials are collected by the **director** **upfront** — before any pipelin
 
 ---
 
-## Plugin: remote-ssh
+## MCP Server: agent-tools
 
-The `remote-ssh` plugin (`.opencode/plugins/remote-ssh.ts`) provides three hooks that support the remote execution workflow:
+The `agent-tools/` MCP server provides remote execution tools:
 
-1. **`shell.env`** — injects GPU connection env vars (`GPU_HOST`, `GPU_USER`, `GPU_SSH_PASSWD`, etc.) into the shell environment for all tool calls
-2. **`tool.execute.after`** — logs all remote tool executions to `.opencode/remote-exec.log` for audit trail
-3. **`experimental.session.compacting`** — preserves remote connection state, Docker image info, MUSA install state, and recent remote commands when context is compacted, preventing context loss during long migrations
+- `remote-exec` — execute shell commands on the Remote MT-GPU Machine host via SSH
+- `remote-docker` — execute commands in Docker containers on the Remote MT-GPU Machine
+- `remote-sync` — sync files between local and remote via rsync
 
-Agents do not interact with the plugin directly — it operates transparently.
+Credentials are loaded from environment variables or `agent-tools/config/remote-ssh.env`.

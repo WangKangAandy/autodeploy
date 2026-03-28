@@ -1,0 +1,73 @@
+# System Dependencies Package List
+# Required packages for MUSA GPU driver and container runtime
+
+packages:
+  # Build tools
+  - name: build-essential
+    description: GCC, make, and other build tools
+    required: true
+
+  - name: dkms
+    description: Dynamic Kernel Module Support
+    required: true
+
+  # Display manager
+  - name: lightdm
+    description: Display manager for GPU operations
+    required: true
+
+  # Graphics libraries
+  - name: libgbm1
+    description: Generic Buffer Management library
+    required: true
+
+  - name: libglapi-mesa
+    description: Mesa GL API library
+    required: true
+
+  # Kernel headers (dynamic)
+  - name: linux-headers-$(uname -r)
+    description: Kernel headers for current kernel
+    required: true
+    dynamic: true
+
+  # Utility tools
+  - name: wget
+    description: HTTP download tool
+    required: true
+
+  - name: curl
+    description: HTTP client
+    required: true
+
+  - name: jq
+    description: JSON processor
+    required: true
+
+  - name: yq
+    description: YAML processor (required for SDK compatibility lookup)
+    required: true
+
+# Package groups for different scenarios
+groups:
+  driver_prerequisites:
+    - build-essential
+    - dkms
+    - libgbm1
+    - libglapi-mesa
+    - linux-headers-$(uname -r)
+
+  display:
+    - lightdm
+
+  utilities:
+    - wget
+    - curl
+    - jq
+    - yq
+
+# Notes
+notes:
+  - "Kernel headers must match the currently running kernel"
+  - "lightdm may prompt for default display manager during installation"
+  - "yq is required for parsing SDK compatibility and toolkit config files"

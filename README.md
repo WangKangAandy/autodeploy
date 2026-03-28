@@ -1,97 +1,52 @@
-# autodeploy
+# openclaw-musa
 
-Automation workspace for MUSA SDK environment setup, remote MT-GPU execution, and deployment runbooks.
+OpenClaw 平台运行时基座，为 MUSA GPU 环境部署和管理提供底层能力。
 
-This repository packages:
+## 核心价值
 
-- documented host deployment flows for MUSA-based environments
-- unified agent tools for SSH-based remote host and container execution
-- Feishu bot integration for AI-powered operations
-- reusable skills and compatibility metadata for repeatable setup work
-
-## What This Repo Is For
-
-- Deploy a base MUSA environment on a local or remote Ubuntu host
-- Update or reinstall only the MUSA driver without re-running the full stack
-- Run build, validation, and GPU checks on a Remote MT-GPU Machine
-- Interact with MUSA environment via Feishu bot
-- Keep deployment knowledge in versioned docs instead of scattered local notes
-
-## Repository Map
-
-| Path | Purpose |
-|------|---------|
-| `agent-tools/` | Unified tool layer for Claude Code, OpenCode, and Feishu bot |
-| `agent-tools/src/core/` | Core executors (execRemote, execDocker, syncFiles) |
-| `agent-tools/src/tools/` | MCP tool definitions |
-| `feishu-claude-bridge/` | Feishu bot with Claude API integration |
-| `skills/deploy_musa_base_env/SKILL.md` | Primary automated workflow for base environment deployment |
-| `skills/update_musa_driver/SKILL.md` | Driver-only upgrade, downgrade, or reinstall workflow |
-| `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK, driver, GPU, and image compatibility mapping |
-| `references/remote-execution-policy.md` | Source of truth for local vs remote command routing |
-| `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
-| `docs/单机环境部署.md` | Manual single-machine deployment reference |
-| `docs/环境问题FAQ.md` | Known environment issues and recovery notes |
-
-## Architecture
+本仓库是 OpenClaw 的平台运行时层，通过以下四层能力构建，将普通插件演变为"主动注入认知的运行时基座"：
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Entry Points                           │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│ Claude Code CLI │   OpenCode CLI  │     Feishu Bot          │
-│   (MCP Proto)   │   (import)      │     (import)            │
-└────────┬────────┴────────┬────────┴──────────┬──────────────┘
-         │                 │                    │
-         ▼                 ▼                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    agent-tools/                             │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ core/executors.ts                                    │  │
-│  │ - execRemote(config, command, options)               │  │
-│  │ - execDocker(config, args)                           │  │
-│  │ - syncFiles(config, args)                            │  │
-│  └──────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ tools/                                               │  │
-│  │ - remote-exec.ts (MCP tool)                          │  │
-│  │ - remote-docker.ts (MCP tool)                        │  │
-│  │ - remote-sync.ts (MCP tool)                          │  │
-│  └──────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ server.ts (MCP Server entry point)                   │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Remote MT-GPU Machine                       │
-│  ┌─────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Host (via SSH)  │  │ Docker Containers (MUSA SDK)    │  │
-│  │ - mthreads-gmi  │  │ - PyTorch MUSA                  │  │
-│  │ - driver ops    │  │ - GPU workloads                 │  │
-│  └─────────────────┘  └─────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  阶段 1: 工具集合 → 阶段 2: 调度层 → 阶段 3: 运行时基座          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    四大核心能力                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Static Rules    — AGENTS.autodeploy.md 自动合并注入         │
+│  2. Dynamic Context — before_prompt_build hook 动态上下文注入    │
+│  3. Dispatcher      — musa_dispatch 统一意图路由                 │
+│  4. State Manager   — 部署状态持久化与恢复                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+| 能力 | 机制 | 注入点 |
+|------|------|--------|
+| Static Rules | AGENTS.md 合并 | `~/.openclaw/workspace/AGENTS.md` |
+| Dynamic Context | before_prompt_build hook | 每次对话构建时 |
+| Dispatcher | musa_dispatch tool | 手动/自动调用 |
+| State Manager | JSON 持久化 | `~/.openclaw/workspace/autodeploy/` |
 
-### 1. Agent Tools Setup
+详细设计文档：[docs/runtime-platform-evolution.md](docs/runtime-platform-evolution.md)
+
+## 快速开始
+
+### 安装
 
 ```bash
-cd agent-tools
 npm install
-npm run build
+npm run build  # 编译 TypeScript 模块
 ```
 
-### 2. Configure Remote Access
+### 配置远程访问
 
 ```bash
 cp agent-tools/config/remote-ssh.env.example agent-tools/config/remote-ssh.env
-# Edit with your credentials
+# 编辑配置文件
 ```
 
-Required variables:
+必需变量：
 
 ```env
 GPU_HOST=<remote-gpu-ip>
@@ -102,75 +57,156 @@ GPU_PORT=22
 TORCH_MUSA_DOCKER_IMAGE=<default-docker-image>
 ```
 
-### 3. Feishu Bot Setup (Optional)
+### 安装为 OpenClaw 插件
 
 ```bash
-cd feishu-claude-bridge
-npm install
-cp config/.env.example config/.env
-# Edit with your Feishu and Claude API credentials
-npm run dev
+# 开发模式（链接到源码）
+openclaw plugins install -l /path/to/autodeploy
+
+# 验证安装
+openclaw plugins info openclaw-musa
 ```
 
-## Run Tests
+## 统一调度器
 
-```bash
-# Agent Tools tests
-cd agent-tools && npm test
+`musa_dispatch` 是所有 MUSA 操作的统一入口：
 
-# Feishu Bridge tests
-cd feishu-claude-bridge && npm test
+| Intent | 描述 | 风险级别 |
+|--------|------|----------|
+| `deploy_env` | 完整 MUSA 环境部署 | destructive |
+| `update_driver` | 驱动操作 | destructive |
+| `gpu_status` | GPU 状态检查 | read_only |
+| `validate` | 环境验证 | read_only |
+| `execute_document` | 文档驱动部署 | destructive |
+
+### 文档驱动执行
+
+支持从 Markdown 文档执行部署：
+
+```javascript
+// 从本地文件
+musa_dispatch(intent="execute_document", context={path: "/path/to/deploy.md"})
+
+// 从粘贴内容
+musa_dispatch(intent="execute_document", context={content: "# Guide\n..."})
 ```
 
-## Scope
+详见：[references/document-driven-execution.md](references/document-driven-execution.md)
 
-The default automation scope in this repo is the base environment only:
+## 架构
 
-- system dependencies
-- MUSA driver
-- MT container toolkit
-- Docker image preparation
-- container validation
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    OpenClaw Gateway                         │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                  openclaw-musa Plugin                 │  │
+│  │                                                      │  │
+│  │  ┌────────────────┐  ┌────────────────┐             │  │
+│  │  │ Static Rules   │  │ Dynamic Ctx    │             │  │
+│  │  │ (AGENTS.md)    │  │ (Hook)         │             │  │
+│  │  └────────────────┘  └────────────────┘             │  │
+│  │                                                      │  │
+│  │  ┌────────────────┐  ┌────────────────┐             │  │
+│  │  │   Dispatcher   │  │ State Manager  │             │  │
+│  │  │ (musa_dispatch)│  │ (JSON 持久化)   │             │  │
+│  │  └────────────────┘  └────────────────┘             │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    agent-tools/                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ core/executors.ts                                    │  │
+│  │ - execRemote(config, command)                        │  │
+│  │ - execDocker(config, args)                           │  │
+│  │ - syncFiles(config, args)                            │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Remote MT-GPU Machine                       │
+│  ┌─────────────────┐  ┌─────────────────────────────────┐  │
+│  │ Host (via SSH)  │  │ Docker Containers (MUSA SDK)    │  │
+│  └─────────────────┘  └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-Extra host-side components such as muDNN, MCCL, and Triton are intentionally out of scope unless explicitly requested.
+## 仓库结构
 
-## Recommended Reading Order
+| 路径 | 用途 |
+|------|------|
+| `index.js` | OpenClaw 插件入口 |
+| `src/dispatcher/` | 统一调度器 (`musa_dispatch`) |
+| `src/adapter/` | OpenClaw 适配器 hooks |
+| `src/core/state-manager.ts` | 状态持久化 |
+| `src/utils/agents-merge.js` | AGENTS.md 合并逻辑 |
+| `src/document/` | 文档驱动执行引擎 |
+| `AGENTS.autodeploy.md` | 平台静态规则（自动合并到 workspace） |
+| `agent-tools/` | MCP 工具层，提供 remote-exec/docker/sync |
+| `skills/` | 可执行技能定义 |
+| `references/` | 非执行性知识资源 |
 
-1. `references/remote-execution-policy.md`
-2. `skills/deploy_musa_base_env/SKILL.md`
-3. `skills/update_musa_driver/SKILL.md`
-4. `references/container-validation-runbook.md`
-5. `docs/环境问题FAQ.md`
+## 可用技能
 
-## Validation Commands
+| 技能 | 描述 | 触发模式 |
+|------|------|----------|
+| `deploy_musa_base_env` | 完整 MUSA 环境部署 | "部署 MUSA 环境", "install MUSA SDK" |
+| `update_musa_driver` | 驱动更新/重装 | "更新驱动", "upgrade driver" |
 
-Host validation:
+## 验证命令
+
+### 主机验证
 
 ```bash
 mthreads-gmi
 ```
 
-Container toolkit validation:
+### 容器工具链验证
 
 ```bash
 docker run --rm --env MTHREADS_VISIBLE_DEVICES=all \
   registry.mthreads.com/cloud-mirror/ubuntu:20.04 mthreads-gmi
 ```
 
-In-container validation:
+### 容器内验证
 
 ```bash
 docker exec torch_musa_test musaInfo
-docker exec torch_musa_test python -c "import torch; print(torch.musa.is_available()); print(torch.tensor(1, device='musa') + 1)"
+docker exec torch_musa_test python -c "import torch; print(torch.musa.is_available())"
 ```
 
-## Notes For Public GitHub Use
+## 运行测试
 
-- `musa_packages/` is intentionally excluded from version control
-- local state files such as `.musa_deployment_state.json` are ignored
-- `agent-tools/config/remote-ssh.env` remains ignored; only the template is published
-- `feishu-claude-bridge/config/.env` remains ignored
+```bash
+# 根目录测试
+npm test
 
-## Language
+# agent-tools 测试
+cd agent-tools && npm test
+```
 
-The repository keeps operational docs in a mixed Chinese and English style to match the original deployment notes and command references.
+## 部署范围
+
+默认自动化范围仅限基础环境：
+
+- 系统依赖
+- MUSA 驱动
+- MT 容器工具链
+- Docker 镜像准备
+- 容器验证
+
+muDNN、MCCL、Triton 等额外组件不在默认范围内，需显式请求。
+
+## 推荐阅读顺序
+
+1. [docs/runtime-platform-evolution.md](docs/runtime-platform-evolution.md) — 运行时基座构建过程
+2. [references/remote-execution-policy.md](references/remote-execution-policy.md) — 本地/远程命令路由策略
+3. [skills/deploy_musa_base_env/SKILL.md](skills/deploy_musa_base_env/SKILL.md) — 完整部署工作流
+4. [references/container-validation-runbook.md](references/container-validation-runbook.md) — 容器验证故障排查
+
+## License
+
+MIT
