@@ -17,6 +17,7 @@ export type DispatchErrorCode =
   | "OPERATION_NOT_FOUND"    // Resume 找不到 operation
   | "OPERATION_NOT_RESUMABLE" // Resume 状态不合法
   | "RESUME_PREREQUISITE_NOT_MET"  // Resume 前提不满足
+  | "RESUME_FAILED"          // Resume 操作生命周期失败
 
 export interface DispatchError {
   code: DispatchErrorCode

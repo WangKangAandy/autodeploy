@@ -19,6 +19,11 @@ export const INTENT_RISK: Record<Intent, RiskLevel> = {
   deploy_env: "destructive",
   update_driver: "destructive",
   execute_document: "destructive",  // Documents may contain destructive commands
+  prepare_model: "safe_write",      // Downloads files, idempotent
+  prepare_dataset: "safe_write",    // Downloads files, idempotent
+  prepare_package: "safe_write",    // Downloads packages, idempotent
+  manage_images: "safe_write",      // Docker image operations, idempotent
+  prepare_repo: "safe_write",       // Git clone/pull, idempotent
   auto: "read_only", // Will be re-evaluated after intent parsing
 }
 
