@@ -1,6 +1,8 @@
 # 第一阶段实施计划：仓库底座升级
 
-> **状态**: ✅ 核心功能已完成（2026-03-28 更新）
+> **状态**: ✅ 核心底座已完成（2026-03-28 更新）
+>
+> **定位**: 第一阶段已具备继续演进的基础，后续工作以底座收口为主，不再新增能力域。
 >
 > **已完成**:
 > - Skill 体系重构（11 个 skill）
@@ -8,7 +10,7 @@
 > - 状态管理统一
 > - 回归测试覆盖（157 个测试）
 >
-> **遗留问题**: 见第 5 节
+> **收口工作**: 见第 5 节
 
 ---
 
@@ -16,7 +18,9 @@
 
 ### 1.1 目标
 
-从"两个粗粒度 skill"升级为"原子 skill + 资产准备"。
+从"两个粗粒度 skill"升级为"原子 skill + 资产准备"，构建可长期演进的底座。
+
+**第一阶段后续定位**：底座收口而非扩面。
 
 ### 1.2 当前状态
 
@@ -28,6 +32,8 @@
 | Dispatcher | orchestrator + router + skill-registry ✅ |
 | 状态管理 | 已统一到 StateManager ✅ |
 | 测试覆盖 | 157 个测试 ✅ |
+
+**评估结论**：当前底座已够支撑上层能力演进，不再是"从 0 到 1"状态。
 
 ---
 
@@ -53,6 +59,12 @@
 | `prepare_model_artifacts` | 模型文件下载 |
 | `prepare_dataset_artifacts` | 数据集下载 |
 | `prepare_dependency_repo` | 代码仓库准备 |
+
+### 2.3 第一阶段边界说明
+
+> **收口边界**：第一阶段后续工作以底座收口为主，不再新增 workload/operator/profiling/diagnostics 等新能力域；这些能力进入下一阶段双线演进。
+>
+> 第一阶段是双线演进的起点，不再承担未来 operator/profiling 设计细节。
 
 ---
 
@@ -80,6 +92,8 @@ skills/
 ---
 
 ## 4. 验收检查清单
+
+> **说明**：以下检查项反映第一阶段核心交付结果；后续仅补充底座收口项，不再新增同阶段能力范围。
 
 ### 4.1 目录结构 ✅
 
@@ -110,40 +124,26 @@ skills/
 ### 4.5 测试 ⏳
 
 - [x] dispatcher/document/executor 测试
-- [ ] 核心模块测试缺失（见 5.1 P1-2）
+- [ ] 核心模块测试缺失（见 5.2）
 
 ---
 
-## 5. 遗留问题与技术债
+## 5. 收口工作
 
-> 2026-03-28 代码库审视发现
+> 第一阶段后续工作只做收口，目标是让底座"可长期演进"。
 
-### 5.1 高优先级
+### 5.1 收口目标
 
-#### P1-1: StateManager 过于庞大
+让底座可信，支撑后续双线演进：
 
-**文件**: `src/core/state-manager.ts`（1,188 行）
+- 状态边界清晰
+- intent 路由唯一事实源
+- 核心骨架可测试
+- 多机/远程探测语义可信
 
-**问题**: 承担 Host/Operation/Job/Document/持久化等多职责
+### 5.2 收口项目
 
-**建议**: 拆分为独立模块
-
----
-
-#### P1-2: 核心模块测试缺失
-
-| 模块 | 行数 | 风险 |
-|------|------|------|
-| state-manager.ts | 1,188 | 高 |
-| ssh-client.js | ~200 | 高 |
-| permission-gate.ts | ~80 | 高 |
-| context-builder.ts | ~200 | 中 |
-
-**建议**: 优先补充 state-manager 和 ssh-client 测试
-
----
-
-#### P1-3: Intent 定义分散，工具 enum 未从唯一事实来源派生
+#### C-1: Intent 单一事实源
 
 **问题**: `musa_dispatch` 工具的 intent enum 硬编码，与 `skills/index.yml` 不同步
 
@@ -156,9 +156,7 @@ skills/
 - `skills/index.yml` dispatch_intent：完整 ✅
 - `dispatcher/index.ts` enum：临时补全 ✅（仍为硬编码）
 
-**根本原因**: 工具 enum 未从 `skills/index.yml` 派生
-
-**方案 C（完整方案）**:
+**方案**:
 
 ```typescript
 // dispatcher/index.ts
@@ -187,55 +185,111 @@ export function registerDispatcherTool(api: any, stateManager: StateManager): vo
 
 ---
 
-### 5.2 中优先级
+#### C-2: StateManager 拆分
 
-#### P2-1: utils 重复
+**文件**: `src/core/state-manager.ts`（1,188 行）
 
-`src/core/utils.js` 和 `agent-tools/src/shared/utils.ts` 完全重复（~70 行）
+**问题**: 承担 Host/Operation/Job/Document/持久化等多职责
 
-**建议**: 提取到 `src/shared/utils.ts`
+**建议拆分为**:
+
+| 模块 | 职责 |
+|------|------|
+| `host-store.ts` | Host 状态管理 |
+| `operation-store.ts` | Operation 状态管理 |
+| `job-store.ts` | Job 状态管理 |
+| `document-store.ts` | Document 执行状态管理 |
+| `persistence-store.ts` | 持久化层 |
+
+**验收**:
+- [ ] 各模块独立，职责单一
+- [ ] StateManager facade 保持接口兼容
+- [ ] 原有测试不受影响
 
 ---
 
-#### P2-2: SSH 执行逻辑重复
+#### C-3: 核心模块测试补齐
 
-`src/core/ssh-client.js` 和 `agent-tools/src/core/executors.ts` 重复
+| 模块 | 行数 | 风险 | 状态 |
+|------|------|------|------|
+| state-manager.ts | 1,188 | 高 | 待补充 |
+| ssh-client.js | ~200 | 高 | 待补充 |
+| permission-gate.ts | ~80 | 高 | 待补充 |
+| context-builder.ts | ~200 | 中 | 待补充 |
 
-**建议**: 提取共享逻辑
+**建议**: 优先补充 state-manager 和 ssh-client 测试
+
+**验收**:
+- [ ] state-manager 核心路径有测试覆盖
+- [ ] ssh-client 连接/执行/错误处理有测试
+- [ ] 测试通过
 
 ---
 
-#### P2-3: probeAllHosts 未实现
+#### C-4: probeAllHosts 做实
 
-只更新时间戳，不探测主机状态
+**问题**: 只更新时间戳，不探测主机状态
 
 **建议**: 实现 SSH 连接测试或重命名方法
 
+**验收**:
+- [ ] probeAllHosts 完成 SSH reachability 测试
+- [ ] 或方法重命名为 `touchAllHosts`
+- [ ] 主机状态语义可信
+
 ---
 
-### 5.3 低优先级
+#### C-5: 重复代码收敛
+
+**问题 1**: `src/core/utils.js` 和 `agent-tools/src/shared/utils.ts` 完全重复（~70 行）
+
+**建议**: 提取到 `src/shared/utils.ts`
+
+**问题 2**: `src/core/ssh-client.js` 和 `agent-tools/src/core/executors.ts` 重复
+
+**建议**: 提取共享逻辑
+
+**验收**:
+- [ ] utils 统一到 `src/shared/utils.ts`
+- [ ] SSH 执行逻辑收敛
+
+---
+
+### 5.3 不在收口范围内
+
+以下低优先级问题不阻塞底座收口：
 
 | 问题 | 说明 |
 |------|------|
-| 双重架构 | OpenClaw/MCP 并行实现 |
-| 配置分散 | 多目录配置文件 |
-| 编译输出 | dist/ 目录污染 |
+| 双重架构 | OpenClaw/MCP 并行实现（设计决策） |
+| 配置分散 | 多目录配置文件（可接受） |
+| 编译输出 | dist/ 目录污染（CI/CD 待解决） |
 
 ---
 
-## 6. 不在第一阶段范围内
+## 6. 收口验收标准
 
-- Workload Spec 定义（第二阶段）
-- 训练/推理 workload skill（第二阶段）
-- Benchmark skill（第三阶段）
-- CUDA 迁移 skill（第三阶段）
+### 6.1 底座可信指标
+
+| 指标 | 验收标准 |
+|------|----------|
+| 状态边界清晰 | StateManager 拆分完成，各模块职责单一 |
+| intent 唯一事实源 | enum 从 index.yml 动态派生 |
+| 核心骨架可测试 | state-manager / ssh-client 测试覆盖 |
+| 多机探测可信 | probeAllHosts 完成真实探测 |
+
+### 6.2 可长期演进指标
+
+- 第一阶段不再新增能力域
+- 底座支撑 V2A/V2B 双线演进
+- 技术债可控，不阻塞后续开发
 
 ---
 
 ## 7. 后续优化：ensure_system_dependencies 增强
 
 > 状态：待实施
-> 优先级：P1
+> 优先级：P1（可在收口期间并行）
 
 **目标**: 支持 GROUPS 分组选择和 CHECK_ONLY 模式
 
