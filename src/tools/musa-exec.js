@@ -1,5 +1,7 @@
 "use strict";
 
+// NOTE: Import from dist to share the same executor instance with dist/adapter/hooks.js
+// This ensures stateManager is properly initialized across all modules
 const {
   setMode,
   getMode,
@@ -7,10 +9,12 @@ const {
   isRemoteReady,
   execute,
   refreshCache,
-} = require("../core/executor");
-const { formatToolResult, formatToolError } = require("../core/utils");
+} = require("../../dist/core/executor");
+const { formatToolResult, formatToolError } = require("../../dist/core/utils");
 
-// StateManager reference for persistence
+// Shared StateManager instance (same instance as executor.js)
+// Created in index.js, injected via registerMusaSetModeTool(api, sm)
+// Used for writing state: registerHost, setDefaultHost, clearDefaultHost
 let stateManager = null;
 
 /**
@@ -83,6 +87,9 @@ This tool must be called before using musa_exec for remote deployment.`,
               { mode }
             );
           }
+
+          // Assert StateManager is ready before using it
+          stateManager.assertReady();
 
           // 1. Register/update the host in StateManager
           const hostId = await stateManager.registerHost({
@@ -261,6 +268,9 @@ Returns:
 
       // Primary path: read from StateManager
       try {
+        // Assert StateManager is ready before using it
+        stateManager.assertReady();
+
         const mode = await stateManager.getExecutionMode();
         const defaultHost = await stateManager.getDefaultHost();
 

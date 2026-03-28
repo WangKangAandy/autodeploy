@@ -65,7 +65,11 @@ const plugin = {
     },
   },
 
-  register(api) {
+  // CRITICAL: This fix assumes OpenClaw plugin loader awaits register():
+  //   await plugin.register(api)
+  // If the framework only calls register() without awaiting, race condition may still occur.
+  // TODO: Verify OpenClaw plugin loading behavior
+  async register(api) {
     const log = (msg) => api.logger.info?.(`[musa] ${formatTracePrefix()}${msg}`);
     const warn = (msg) => api.logger.warn?.(`[musa] ${formatTracePrefix()}${msg}`);
 
@@ -116,12 +120,18 @@ const plugin = {
       const { registerHooks: registerHooksFn } = require("./dist/adapter/hooks");
       const { registerDispatcherTool: registerDispatcher } = require("./dist/dispatcher");
 
-      // Initialize state manager
+      // Initialize state manager (MUST wait for completion before accepting requests)
+      // Race condition fix: if Feishu message arrives before initialize() completes,
+      // executor.refreshCache() would fallback to local mode incorrectly
       const workspacePath = api.getWorkspacePath?.() || process.cwd();
       stateManager = new StateManager(workspacePath);
-      stateManager.initialize().catch(err => {
-        api.logger.error?.(`[musa] Failed to initialize state manager: ${err}`);
-      });
+      try {
+        await stateManager.initialize();
+        log("StateManager initialized successfully");
+      } catch (err) {
+        api.logger.error?.(`[musa] Failed to initialize state manager: ${err?.stack || err}`);
+        throw err; // Fail fast - state manager must be ready before accepting requests
+      }
 
       registerHooks = registerHooksFn;
       registerDispatcherTool = registerDispatcher;

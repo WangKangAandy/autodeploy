@@ -44,6 +44,8 @@ describe("executor state management", () => {
 
   function createMockStateManager(overrides = {}) {
     return {
+      isReady: vi.fn().mockReturnValue(true),
+      assertReady: vi.fn().mockReturnValue(undefined),
       getExecutionMode: vi.fn().mockResolvedValue("local"),
       getRemoteConfig: vi.fn().mockResolvedValue(null),
       getDefaultHost: vi.fn().mockResolvedValue(null),

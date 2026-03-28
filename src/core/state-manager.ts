@@ -225,10 +225,33 @@ export class StateManager {
   private stateDir: string
   private cache: Map<string, unknown> = new Map()
   private lockHandle: fs.promises.FileHandle | null = null
+  private _ready: boolean = false  // Initialization state tracking
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath
     this.stateDir = path.join(workspacePath, "autodeploy")
+  }
+
+  /**
+   * Check if StateManager is ready for operations
+   */
+  isReady(): boolean {
+    return this._ready
+  }
+
+  /**
+   * Assert StateManager is ready, throw error if not
+   */
+  assertReady(): void {
+    if (!this._ready) {
+      throw new Error(
+        "StateManager not ready. Possible causes:\n" +
+        "  - Plugin startup race: operations called before register() completed\n" +
+        "  - Initialization failure: state directory or file creation failed\n" +
+        "  - File system error: permission denied, disk full, or corruption\n" +
+        "Ensure plugin.register() finishes before accepting requests."
+      )
+    }
   }
 
   // ============================================================================
@@ -236,15 +259,22 @@ export class StateManager {
   // ============================================================================
 
   async initialize(): Promise<void> {
-    await fs.promises.mkdir(this.stateDir, { recursive: true })
+    try {
+      await fs.promises.mkdir(this.stateDir, { recursive: true })
 
-    // Initialize empty state files if not exist
-    const stateFiles = ["hosts.json", "jobs.json", "operations.json", "deployment_state.json", "document_executions.json"]
-    for (const file of stateFiles) {
-      const filePath = path.join(this.stateDir, file)
-      if (!fs.existsSync(filePath)) {
-        await this.atomicWrite(file, this.getDefaultState(file))
+      // Initialize empty state files if not exist
+      const stateFiles = ["hosts.json", "jobs.json", "operations.json", "deployment_state.json", "document_executions.json"]
+      for (const file of stateFiles) {
+        const filePath = path.join(this.stateDir, file)
+        if (!fs.existsSync(filePath)) {
+          await this.atomicWrite(file, this.getDefaultState(file))
+        }
       }
+
+      this._ready = true
+    } catch (err) {
+      this._ready = false
+      throw err
     }
   }
 

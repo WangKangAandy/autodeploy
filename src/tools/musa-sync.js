@@ -1,7 +1,8 @@
 "use strict";
 
-const { executeSync, getMode, getRemoteConfig, isRemoteReady } = require("../core/executor");
-const { formatToolResult, formatToolError } = require("../core/utils");
+// NOTE: Import from dist to share the same executor instance with dist/adapter/hooks.js
+const { executeSync, getMode, getRemoteConfig, isRemoteReady } = require("../../dist/core/executor");
+const { formatToolResult, formatToolError } = require("../../dist/core/utils");
 
 /**
  * Register musa_sync tool
