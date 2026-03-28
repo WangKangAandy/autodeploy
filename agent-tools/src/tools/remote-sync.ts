@@ -11,8 +11,9 @@ import type { ToolResponse, SyncArgs } from "../core/index.js"
  */
 export const RemoteSyncTool = {
   name: "remote-sync",
-  description: `Sync files between the local machine and the Remote MT-GPU Machine via rsync over SSH.
+  description: `Sync files between the local machine and the Remote MT-GPU Machine via SFTP.
 Supports both push (local to remote) and pull (remote to local) directions.
+Features: exclude patterns (glob), delete extra files, skip unchanged files (size/mtime).
 Requires GPU_HOST, GPU_USER, GPU_SSH_PASSWD environment variables.`,
   inputSchema: {
     type: "object",
@@ -43,7 +44,7 @@ Requires GPU_HOST, GPU_USER, GPU_SSH_PASSWD environment variables.`,
         type: "array",
         items: { type: "string" },
         description:
-          "Patterns to exclude from sync (rsync --exclude patterns). E.g. ['*.tmp', '.git']",
+          "Glob patterns to exclude from sync. E.g. ['*.tmp', '.git', '**/node_modules']",
         default: [],
       },
       timeout: {
