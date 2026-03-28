@@ -7,6 +7,10 @@
 import type { StateManager } from "../core/state-manager.js"
 import { buildDynamicContext } from "./context-builder.js"
 
+// Import executor's refreshCache function
+// Note: executor.js is plain JS, so we use require
+const executor = require("../core/executor.js")
+
 export interface OpenClawAPI {
   on: (hookName: string, handler: (event: any) => void | Promise<void>, opts?: { priority?: number }) => void
   logger: {
@@ -22,11 +26,18 @@ export interface OpenClawAPI {
 export function registerHooks(api: OpenClawAPI, stateManager: StateManager): void {
   const log = (msg: string) => api.logger.info?.(`[musa-adapter] ${msg}`)
 
+  // Initialize executor with StateManager reference
+  executor.init(stateManager)
+
   // Dynamic context injection - highest priority
   // Note: priority is passed as second argument object in some OpenClaw versions
   try {
     api.on("before_prompt_build", async (event: BeforePromptBuildEvent) => {
       try {
+        // 1. Refresh executor cache from StateManager (ensures mode is up-to-date)
+        await executor.refreshCache()
+
+        // 2. Build and inject dynamic context
         const dynamicContext = await buildDynamicContext(stateManager)
         event.prependSystemContext(dynamicContext)
         log("Dynamic context injected")
@@ -38,6 +49,10 @@ export function registerHooks(api: OpenClawAPI, stateManager: StateManager): voi
     // Fallback for APIs that don't support priority
     api.on("before_prompt_build", async (event: BeforePromptBuildEvent) => {
       try {
+        // 1. Refresh executor cache from StateManager
+        await executor.refreshCache()
+
+        // 2. Build and inject dynamic context
         const dynamicContext = await buildDynamicContext(stateManager)
         event.prependSystemContext(dynamicContext)
         log("Dynamic context injected")

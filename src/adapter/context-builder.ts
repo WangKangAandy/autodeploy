@@ -123,8 +123,9 @@ interface DocumentExecutionContext {
 async function buildDocumentExecutionContext(stateManager: StateManager): Promise<DocumentExecutionContext | null> {
   try {
     // Find running or awaiting_input operation with execute_document intent
-    const operations = await (stateManager as any).loadState<Operation[]>("operations.json")
-    const docOp = operations?.find(op =>
+    const sm = stateManager as unknown as { loadState: (file: string) => Promise<Operation[] | null> }
+    const operations = await sm.loadState("operations.json")
+    const docOp = operations?.find((op: Operation) =>
       op.intent === "execute_document" &&
       ["running", "awaiting_input"].includes(op.execution.status)
     )
