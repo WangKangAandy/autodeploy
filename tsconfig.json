@@ -23,7 +23,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "agent-tools",
-    "feishu-claude-bridge"
+    "agent-tools"
   ]
 }

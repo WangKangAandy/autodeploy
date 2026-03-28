@@ -12,10 +12,11 @@ const { registerMusaSyncTool } = require("./musa-sync");
  * Register all MUSA deployment tools
  *
  * @param {Object} api - OpenClaw plugin API
+ * @param {Object} stateManager - StateManager instance for persistence
  */
-function registerMusaTools(api) {
+function registerMusaTools(api, stateManager = null) {
   // Mode management tools
-  registerMusaSetModeTool(api);
+  registerMusaSetModeTool(api, stateManager);
   registerMusaGetModeTool(api);
 
   // Execution tools

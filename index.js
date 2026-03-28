@@ -9,6 +9,37 @@ const { ensureAgentsMerged, checkStaticRules } = require("./src/utils/agents-mer
 // For now, we provide optional loading with fallback.
 
 /**
+ * Get LarkTicket from openclaw-lark plugin
+ *
+ * Uses AsyncLocalStorage to propagate ticket context in the async call chain.
+ * Works when the plugin is invoked through openclaw-lark (Feishu messages).
+ *
+ * @returns {object|undefined} LarkTicket with messageId, chatId, accountId, senderOpenId
+ */
+function getLarkTicket() {
+  try {
+    const larkTicketPath = path.join(
+      require("os").homedir(),
+      ".openclaw/extensions/openclaw-lark/src/core/lark-ticket.js"
+    );
+    const { getTicket } = require(larkTicketPath);
+    return getTicket();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Format trace prefix for logging
+ * Simple format: [TRACE:messageId]
+ */
+function formatTracePrefix() {
+  const ticket = getLarkTicket();
+  if (!ticket?.messageId) return "";
+  return `[TRACE:${ticket.messageId}] `;
+}
+
+/**
  * OpenClaw MUSA Deployment Plugin
  *
  * Platform runtime layer for MUSA SDK environment deployment and GPU management.
@@ -35,8 +66,8 @@ const plugin = {
   },
 
   register(api) {
-    const log = (msg) => api.logger.info?.(`[musa] ${msg}`);
-    const warn = (msg) => api.logger.warn?.(`[musa] ${msg}`);
+    const log = (msg) => api.logger.info?.(`[musa] ${formatTracePrefix()}${msg}`);
+    const warn = (msg) => api.logger.warn?.(`[musa] ${formatTracePrefix()}${msg}`);
 
     // OpenClaw workspace is separate from plugin directory
     // Use OPENCLAW_WORKSPACE env or default to ~/.openclaw/workspace
@@ -121,24 +152,27 @@ const plugin = {
     }
 
     // 5. Register existing tools (fallback layer)
-    registerMusaTools(api);
+    // Pass stateManager for mode persistence
+    registerMusaTools(api, stateManager);
     log("Registered execution tools: musa_set_mode, musa_get_mode, musa_exec, musa_docker, musa_sync");
 
-    // Tool call logging
+    // Tool call logging with trace context
     api.on("before_tool_call", (event) => {
       if (event.toolName.startsWith("musa_")) {
-        log(`tool call: ${event.toolName}`);
+        const tracePrefix = formatTracePrefix();
+        log(`${tracePrefix}tool call: ${event.toolName}`);
       }
     });
 
     api.on("after_tool_call", (event) => {
       if (event.toolName.startsWith("musa_")) {
+        const tracePrefix = formatTracePrefix();
         if (event.error) {
           api.logger.error?.(
-            `[musa] tool fail: ${event.toolName} ${event.error} (${event.durationMs ?? 0}ms)`
+            `[musa] ${tracePrefix}tool fail: ${event.toolName} ${event.error} (${event.durationMs ?? 0}ms)`
           );
         } else {
-          log(`tool done: ${event.toolName} (${event.durationMs ?? 0}ms)}`);
+          log(`${tracePrefix}tool done: ${event.toolName} (${event.durationMs ?? 0}ms)}`);
         }
       }
     });
@@ -165,3 +199,6 @@ const plugin = {
 
 module.exports = plugin;
 module.exports.default = plugin;
+// Export getLarkTicket for use in compiled modules
+module.exports.getLarkTicket = getLarkTicket;
+module.exports.formatTracePrefix = formatTracePrefix;
