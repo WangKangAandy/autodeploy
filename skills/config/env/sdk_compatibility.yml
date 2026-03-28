@@ -5,9 +5,10 @@
 metadata:
   moss_alias: sh-moss
   moss_endpoint: https://sh-moss.mthreads.com
-  moss_credentials:
-    access_key: sw-guest-mt-sw
-    secret_key: sw-guest123
+  # MOSS credentials are read from environment variables:
+  # - MOSS_ACCESS_KEY (or MT_MOSS_ACCESS_KEY)
+  # - MOSS_SECRET_KEY (or MT_MOSS_SECRET_KEY)
+  # If not set, defaults to guest credentials for public packages
   driver_path_template: "sh-moss/sw-release/musa/external/{sdk_version}/deb/musa_{driver_version}-server_amd64.deb"
   # Container runtime validation
   validation_image: registry.mthreads.com/cloud-mirror/ubuntu:20.04
