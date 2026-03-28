@@ -12,7 +12,6 @@ When instructions conflict, prefer `skills/` workflow definitions over `docs/` r
 | `agent-tools/src/core/` | Core executors: execRemote, execDocker, syncFiles |
 | `agent-tools/src/tools/` | MCP tool definitions for remote execution |
 | `agent-tools/src/server.ts` | MCP Server entry point |
-| `feishu-claude-bridge/` | Feishu bot with Claude API integration |
 | `skills/deploy_musa_base_env/SKILL.md` | Primary source for automated deployment workflow |
 | `skills/update_musa_driver/SKILL.md` | Targeted workflow for driver-only operations |
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK/driver/environment/supported-image compatibility mapping |
@@ -29,15 +28,33 @@ When instructions conflict, prefer `skills/` workflow definitions over `docs/` r
 cd agent-tools && npm install && npm run build
 ```
 
-### Feishu Bridge
-
-```bash
-cd feishu-claude-bridge && npm install && npm run build
-```
-
 ## Test Commands
 
-This repo relies on targeted environment validation rather than a conventional unit test suite.
+### Unit Tests
+
+Run all tests:
+```bash
+npm test
+```
+
+Run tests in watch mode:
+```bash
+npm run test:watch
+```
+
+Run a single test file:
+```bash
+npx vitest run tests/<test-name>.test.ts
+```
+
+Run a specific test by name pattern:
+```bash
+npx vitest run -t "<test-name>"
+```
+
+### Environment Validation
+
+This repo also uses targeted environment validation for MUSA GPU testing.
 
 ### Host validation
 ```bash
@@ -168,6 +185,10 @@ For tasks involving GPU, MUSA, driver, MCCL, model deployment, or remote cluster
 | 验证环境 | `musa_dispatch(intent="validate")` |
 | 文件传输 | `musa_dispatch(intent="sync")` |
 | 运行容器 | `musa_dispatch(intent="run_container")` |
+| **下载模型** | `musa_dispatch(intent="prepare_model", context={MODEL_NAME: "Qwen/Qwen2-7B"})` |
+| **准备数据集** | `musa_dispatch(intent="prepare_dataset", context={DATASET_NAME: "alpaca"})` |
+| **准备安装包** | `musa_dispatch(intent="prepare_package", context={PACKAGE_TYPE: "driver", VERSION: "3.3.5"})` |
+| **克隆仓库** | `musa_dispatch(intent="prepare_repo", context={REPO_URL: "https://..."})` |
 | **按文档部署** | `musa_dispatch(intent="execute_document", context={...})` |
 
 ### Risk Levels
@@ -248,5 +269,37 @@ When a step requires calling existing skills (e.g., `deploy_env`), internal disp
 If `musa_dispatch` fails:
 1. Try direct tool calls: `musa_exec`, `musa_docker`, `musa_sync`
 2. Execute manual commands as last resort
+
+### Log Tracing (Debugging Feishu Issues)
+
+When debugging issues reported from Feishu, use traceId to trace the call chain:
+
+**TraceId Source:** Feishu message `messageId` becomes `traceId` throughout the execution.
+
+**Log Locations:**
+```bash
+# Tool execution logs
+.claude/remote-exec.log
+
+# State persistence
+autodeploy/operations.json
+autodeploy/jobs.json
+```
+
+**Debugging Steps:**
+```bash
+# 1. Get messageId from Feishu (visible in message URL)
+
+# 2. Search logs
+grep "traceId.*<messageId>" .claude/remote-exec.log
+
+# 3. Check operation state
+cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
+```
+
+**Log Format:**
+```
+[service] [TRACE:xxx] [OP:yyy] [LEVEL] message
+```
 
 <!-- AUTODEPLOY:END -->

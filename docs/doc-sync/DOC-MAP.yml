@@ -1,0 +1,126 @@
+# 文档-代码映射表
+# 用途：当代码变更时，提示需要检查的文档
+# 后续可接入 CI 脚本自动提醒
+#
+# owner: 推荐的评审/维护责任组标识，后续可用于 CODEOWNERS 或 PR 提示
+# severity: high / medium / low - 文档漏更的严重程度
+# examples: 正例和负例示例，帮助 subagent 判断
+
+mappings:
+  - name: skills-index-docs
+    code:
+      - "skills/index.yml"
+    docs:
+      - "docs/doc-sync/skills.md"
+    check: "仅当 skill 触发词、参数、入口能力变化时更新"
+    review_hint: "新增/删除/修改 skill 的 intent、triggers、inputs/outputs 时重点检查"
+    owner: "skills-team"
+    severity: "medium"
+    examples:
+      must_update:
+        - "新增 skill 定义"
+        - "修改 intent 名称"
+        - "修改 triggers 触发词"
+        - "修改 inputs/outputs 字段"
+      usually_no_update:
+        - "仅修改 description 文案"
+        - "仅调整 YAML 格式"
+
+  - name: skills-impl-docs
+    code:
+      - "skills/**/SKILL.md"
+    docs:
+      - "docs/doc-sync/skills.md"
+    check: "仅当 skill 行为、步骤、状态机变化时更新（措辞、注释、示例微调无需更新）"
+    review_hint: "涉及 skill 核心流程、状态、步骤变化时重点检查"
+    owner: "skills-team"
+    severity: "medium"
+    examples:
+      must_update:
+        - "新增或删除步骤"
+        - "修改步骤执行逻辑"
+        - "修改状态机状态"
+        - "修改输入/输出参数"
+      usually_no_update:
+        - "修改注释或示例文案"
+        - "调整代码块格式"
+
+  - name: dispatcher-docs
+    code:
+      - "src/dispatcher/**/*.ts"
+    docs:
+      - "docs/doc-sync/dispatcher.md"
+    check: "Intent 解析、路由逻辑、调度行为变化时更新"
+    review_hint: "涉及 intent 解析、路由规则、权限门控变化时重点检查"
+    owner: "core-runtime"
+    severity: "high"
+    examples:
+      must_update:
+        - "新增或删除 intent"
+        - "修改 intent 解析规则"
+        - "修改路由逻辑"
+        - "修改权限门控行为"
+        - "修改调度流程"
+      usually_no_update:
+        - "重构内部辅助函数"
+        - "修改日志语句"
+
+  - name: state-manager-docs
+    code:
+      - "src/core/state-manager.ts"
+    docs:
+      - "docs/doc-sync/state-manager.md"
+    check: "状态字段、持久化逻辑、生命周期变化时更新"
+    review_hint: "涉及状态模型、持久化文件格式、生命周期变化时重点检查"
+    owner: "core-runtime"
+    severity: "high"
+    examples:
+      must_update:
+        - "新增或删除状态字段"
+        - "修改持久化文件格式"
+        - "修改 Operation 生命周期状态"
+        - "修改 Job 进度字段"
+        - "修改 hosts.json / operations.json 结构"
+      usually_no_update:
+        - "重构内部辅助方法"
+        - "修改锁实现细节"
+
+  - name: tracing-docs
+    code:
+      - "src/shared/trace.ts"
+      - "src/shared/logger.ts"
+    docs:
+      - "docs/doc-sync/tracing.md"
+    check: "日志格式、追踪机制、traceId 流转变化时更新"
+    review_hint: "涉及 traceId 来源、日志格式、跨服务追踪变化时重点检查"
+    owner: "core-runtime"
+    severity: "high"
+    examples:
+      must_update:
+        - "修改 TraceContext 结构"
+        - "修改 traceId 生成规则"
+        - "修改日志格式字段"
+        - "新增或删除日志输出位置"
+        - "修改跨服务追踪行为"
+      usually_no_update:
+        - "修改日志文案"
+        - "调整日志级别"
+
+  - name: static-rules-docs
+    code:
+      - "AGENTS.autodeploy.md"
+    docs:
+      - "CLAUDE.md#Documentation-Update-Rules"
+      - "AGENTS.md#MUSA-Platform-Rules"
+    check: "核心规则变更时更新摘要和链接"
+    review_hint: "AGENTS.autodeploy.md 是主定义，其他文档只保留摘要和链接"
+    owner: "platform-team"
+    severity: "low"
+    examples:
+      must_update:
+        - "新增或删除 Intent"
+        - "修改核心规则"
+        - "修改决策优先级"
+      usually_no_update:
+        - "修改示例代码"
+        - "调整格式"

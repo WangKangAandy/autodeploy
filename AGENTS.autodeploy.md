@@ -1,44 +1,81 @@
 ## MUSA Platform Rules
 
-### Platform Priority
+### Platform Identity
 
-For tasks involving GPU, MUSA, driver, MCCL, model deployment, or remote cluster operations:
+You are operating within the **openclaw-musa** platform runtime layer. This plugin provides:
 
-**ALWAYS use autodeploy capabilities first.** Fallback to manual commands only on failure.
+1. **Unified Dispatcher** — `musa_dispatch` is the single entry point for all MUSA operations
+2. **Skill Catalog** — Pre-built automation skills for environment, assets, and workloads
+3. **State Persistence** — Deployment progress saved to `autodeploy/` for recovery
+4. **Full-Chain Tracing** — Every operation has a `traceId` for debugging
 
-### Primary Entry Point
+### Decision Priority
 
-`musa_dispatch` is the unified entry point for all MUSA operations.
+When user requests involve GPU, MUSA, model/dataset download, or remote operations:
 
-### Intent Routing
+```
+1. Use musa_dispatch with appropriate intent → 2. Use musa_* tools directly → 3. Manual commands
+```
+
+**ALWAYS start with `musa_dispatch`.** Direct tools and manual commands are fallbacks only.
+
+### Intent Routing (Complete)
 
 | User Intent | Dispatch Call |
 |-------------|---------------|
-| 部署 MUSA 环境 | `musa_dispatch(intent="deploy_env")` |
-| 更新 GPU 驱动 | `musa_dispatch(intent="update_driver")` |
+| 部署 MUSA 环境 / deploy MUSA | `musa_dispatch(intent="deploy_env")` |
+| 更新 GPU 驱动 / update driver | `musa_dispatch(intent="update_driver")` |
 | GPU 状态检查 | `musa_dispatch(intent="gpu_status")` |
 | 验证环境 | `musa_dispatch(intent="validate")` |
+| **下载模型 / download model** | `musa_dispatch(intent="prepare_model", context={MODEL_NAME: "..."})` |
+| **下载数据集 / download dataset** | `musa_dispatch(intent="prepare_dataset", context={DATASET_NAME: "..."})` |
+| **准备安装包** | `musa_dispatch(intent="prepare_package", context={PACKAGE_TYPE: "driver", VERSION: "..."})` |
+| **克隆仓库** | `musa_dispatch(intent="prepare_repo", context={REPO_URL: "..."})` |
 | 文件传输 | `musa_dispatch(intent="sync")` |
 | 运行容器 | `musa_dispatch(intent="run_container")` |
-| **按文档部署** | `musa_dispatch(intent="execute_document", context={...})` |
+| 按文档部署 | `musa_dispatch(intent="execute_document", context={path: "..."})` |
 
 ### Risk Levels
 
 | Level | Operations | Confirmation |
 |-------|------------|--------------|
 | `read_only` | gpu_status, validate | None |
-| `safe_write` | sync, run_container | Warning only |
-| `destructive` | deploy_env, update_driver, **execute_document** | Required |
+| `safe_write` | sync, run_container, prepare_* | Warning only |
+| `destructive` | deploy_env, update_driver, execute_document | Required |
 
 ### Quick Actions
 
-- Check GPU: `musa_dispatch(intent="gpu_status")`
-- Resume Deployment: `musa_dispatch(intent="deploy_env", action="resume")`
-- Validate Environment: `musa_dispatch(intent="validate")`
+```javascript
+// Check GPU status
+musa_dispatch(intent="gpu_status")
+
+// Download model (supports HuggingFace and ModelScope)
+musa_dispatch(intent="prepare_model", context={MODEL_NAME: "Qwen/Qwen2-7B", MODEL_SOURCE: "modelscope"})
+
+// Resume interrupted deployment
+musa_dispatch(intent="deploy_env", action="resume")
+
+// Execute from deployment document
+musa_dispatch(intent="execute_document", context={path: "/path/to/deploy.md"})
+```
+
+### Debugging with TraceId
+
+When investigating issues from Feishu/Dingding:
+
+```bash
+# 1. Get messageId from Feishu message URL
+
+# 2. Search logs by traceId (= messageId)
+grep "traceId.*<messageId>" .claude/remote-exec.log
+cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
+```
+
+Log locations:
+- Tool execution: `.claude/remote-exec.log`
+- State persistence: `autodeploy/operations.json`, `autodeploy/jobs.json`
 
 ### Document-Driven Execution
-
-When users provide deployment documents, use `execute_document` intent:
 
 ```javascript
 // From local file
@@ -51,49 +88,7 @@ musa_dispatch(intent="execute_document", context={content: "# Guide\n..."})
 musa_dispatch(intent="execute_document", action="resume", context={operationId: "op_xxx"})
 ```
 
-**Parameter Rules:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `path` | One of path/content | Local document file path |
-| `content` | One of path/content | Pasted document content |
-| `operationId` | Required for resume | Operation ID to resume |
-
-- `path` and `content` are **mutually exclusive** - provide exactly one
-- If both provided, `path` takes priority
-- If neither provided, returns error
-
-**Risk Handling:**
-- Entry level: treated as `destructive`, requires user confirmation
-- Step level: each step's risk level shown separately in Plan Review (read_only / safe_write / destructive)
-
-**Supported Sources (Stage 1A):**
-- Local files (`path` parameter)
-- Pasted content (`content` parameter)
-
-**Trigger Patterns (Conservative):**
-- "按文档部署" / "execute from document"
-- "执行文档" / "execute document"
-- "根据文档部署" / "deploy from document"
-
-**Execution Flow:**
-1. **Load** → Load document
-2. **Parse** → Extract phases and steps
-3. **Plan** → Generate execution plan
-4. **Safety** → Validate against safety rules
-5. **Review** → User confirmation (awaiting_input)
-6. **Execute** → Execute steps
-
-**Internal Dispatch Mode:**
-
-When a step requires calling existing skills (e.g., `deploy_env`), internal dispatch is used:
-- Does NOT re-trigger top-level permission gate / plan review / operation creation
-- Still performs necessary prechecks and validation
-- Reuses parent operation context
-
-**Note:** Feishu/Dingding document sources are Stage 1B (not currently supported).
-
-**Details:** See `references/document-driven-execution.md`
+**Execution Flow:** Load → Parse → Plan → Safety → Review → Execute
 
 ### Fallback Behavior
 

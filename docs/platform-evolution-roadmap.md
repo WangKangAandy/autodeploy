@@ -94,7 +94,7 @@ skills/
     ensure_system_dependencies/     # 确保系统依赖已安装
     ensure_musa_driver/             # 状态驱动入口: 确保驱动状态
     ensure_mt_container_toolkit/    # 确保容器工具包
-    prepare_runtime_image/          # 准备运行时镜像
+    manage_container_images/          # 准备运行时镜像
     validate_musa_container_environment/  # 容器环境验证
 
   assets/                           # 资产准备相关 skill
@@ -243,7 +243,7 @@ skills:
 | `ensure_system_dependencies` | 确保系统依赖已安装 | Step 1 |
 | `ensure_musa_driver` | 确保驱动处于正确状态 | Step 2 |
 | `ensure_mt_container_toolkit` | 确保容器工具包安装并绑定 | Step 3 |
-| `prepare_runtime_image` | 拉取/校验运行时镜像 | Step 4 |
+| `manage_container_images` | 管理容器镜像 (pull/push/export/import/list/remove) | Step 4 |
 | `validate_musa_container_environment` | 容器内环境验证 | Step 5 |
 
 **关于 `ensure_system_dependencies`**：
@@ -260,7 +260,7 @@ deploy_musa_base_env:
   1. ensure_system_dependencies
   2. ensure_musa_driver
   3. ensure_mt_container_toolkit
-  4. prepare_runtime_image
+  4. manage_container_images
   5. validate_musa_container_environment
 ```
 
@@ -452,29 +452,25 @@ deploy_musa_base_env(hosts: ["gpu-01", "gpu-02", "gpu-03"])
 **best-effort**：任一 host 失败时，其他 host 继续执行，最终聚合失败列表，**不做自动回滚**。
 - 跨主机依赖图优化
 
-#### D. Readiness 验证
+#### D. 环境验证
 
-##### 新增 skill
+##### 验证 skill
 
 | Skill | 职责 |
 |-------|------|
-| `validate_driver_runtime` | 驱动层验证 |
-| `validate_container_runtime` | 容器运行时验证 |
-| `validate_model_runtime_readiness` | 模型运行准备验证 |
+| `validate_musa_container_environment` | 容器内 MUSA 环境验证（musaInfo、torch.musa、tensor 操作、GPU 内存） |
 
-##### 与 `validate_musa_container_environment` 的关系
+##### 验证体系
 
-**两层验证体系**：
+**简化后的验证体系**：
 
-| 层次 | Skill | 用途 |
-|------|-------|------|
-| 组合 skill 终态验收 | `validate_musa_container_environment` | `deploy_musa_base_env` 的最后验收步骤 |
-| 可复用细粒度检查 | `validate_driver_runtime` 等 | 通用检查件，可被多个 skill 调用 |
+- `ensure_*` skills 内置验证逻辑，安装后自动验证
+- `validate_musa_container_environment` 作为端到端验证，测试完整的容器内功能
 
 **说明**：
-- `validate_musa_container_environment` 是"环境交付主链的终态验证"，作为 `deploy_musa_base_env` 的最后一步
-- Readiness 验证 skill 是"通用检查件"，可以独立调用或被其他 skill 复用
-- 前者关注"整个环境是否可用"，后者关注"某个组件是否就绪"
+- `ensure_musa_driver` 安装后自动验证 mthreads-gmi
+- `ensure_mt_container_toolkit` 安装后自动验证容器 GPU 访问
+- `validate_musa_container_environment` 用于部署后端到端验证，测试 torch.musa 和 tensor 操作
 
 ---
 
@@ -609,11 +605,14 @@ prepare_dependency_repo
 | 6 | 多机 inventory/role/fan-out | 5-6 天 | 无 |
 | 7 | Readiness 验证 skill | 2-3 天 | 2 |
 | 8 | 文档执行与新 skill 映射 | 1-2 天 | 2, 5 |
+| 9 | **构建文档守门 Subagent** | 2-3 天 | 无 |
+| 10 | **CI 集成文档守门机制** | 1-2 天 | 9 |
 
 **实施顺序说明**：
 1. 先定规则（index.yml 结构），再填实例（具体 skill）
 2. skill 索引结构是"规则"，具体 skill 是"实例"
 3. 工时预估已包含文档更新、tests、dispatcher/router 适配、state manager 扩展、回归验证
+4. 文档守门机制独立于 skill 体系，可并行开发
 
 ### 5.2 二等优先级（底座稳了再做）
 
@@ -684,6 +683,8 @@ MCP 是对外暴露层，应该在 skill 成熟后再包装。
 - [ ] 4 个资产准备 skill 可用
 - [ ] 多机 fan-out 执行可用
 - [ ] 基础设施类文档步骤优先映射到 env/assets 原子 skill
+- [ ] **文档守门 Subagent 可用**
+- [ ] **CI 集成完成，BLOCK 场景可自动拦截**
 - [ ] 所有测试通过
 
 ### 7.2 第二阶段完成标准
