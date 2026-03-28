@@ -225,10 +225,33 @@ export class StateManager {
   private stateDir: string
   private cache: Map<string, unknown> = new Map()
   private lockHandle: fs.promises.FileHandle | null = null
+  private _ready: boolean = false  // Track initialization state
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath
     this.stateDir = path.join(workspacePath, "autodeploy")
+  }
+
+  /**
+   * Check if StateManager is ready for operations
+   */
+  isReady(): boolean {
+    return this._ready
+  }
+
+  /**
+   * Assert StateManager is ready, throw error if not
+   */
+  assertReady(): void {
+    if (!this._ready) {
+      throw new Error(
+        "StateManager not ready. Possible causes:\n" +
+        "  - Plugin startup race: operations called before register() completed\n" +
+        "  - Initialization failure: state directory or file creation failed\n" +
+        "  - File system error: permission denied, disk full, or corruption\n" +
+        "Ensure plugin.register() finishes before accepting requests."
+      )
+    }
   }
 
   // ============================================================================
@@ -246,6 +269,8 @@ export class StateManager {
         await this.atomicWrite(file, this.getDefaultState(file))
       }
     }
+
+    this._ready = true
   }
 
   // ============================================================================
