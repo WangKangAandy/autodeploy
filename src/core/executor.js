@@ -8,38 +8,11 @@ const { execRemote, execRemoteDocker, syncFiles } = require("./ssh-client");
 // ============================================================================
 
 /**
- * Executor derives mode from StateManager instance.
- *
- * StateManager instance is created in index.js and injected to multiple modules:
- * - executor.js (this file): for reading state (refreshCache)
- * - musa-exec.js: for writing state (registerHost, setDefaultHost)
- *
- * All modules share the SAME StateManager instance, ensuring state consistency.
- * refreshCache() is called before each execution to sync with persisted state.
- *
- * TODO: Three-state mode separation (future enhancement)
- * ------------------------------------------------------
- * Current implementation uses two states: local | remote
- * This can cause issues when state is uncertain:
- *
- * Proposed three-state model:
- * - local:     Explicitly configured as local mode (no default host)
- * - remote:    Explicitly configured with valid default host
- * - unknown:   State not ready / StateManager not initialized / config incomplete
- *
- * With three-state, "unknown" should REJECT execution instead of fallback to local.
- * This prevents silent incorrect execution when:
- * 1. Plugin startup race condition (fixed by await initialize())
- * 2. StateManager corrupted/deleted after startup
- * 3. Network issues cause state read failure
- *
- * Implementation would require:
- * - cachedMode type: "local" | "remote" | "unknown"
- * - isRemoteReady() → isModeKnown() && cachedMode === "remote"
- * - execute() should throw on unknown mode, not fallback
+ * Executor is stateless - it derives mode from StateManager.
+ * StateManager is the single source of truth for connection state.
  */
 
-let stateManager = null;      // Shared StateManager instance (injected via init)
+let stateManager = null;      // StateManager reference (injected at init)
 let cachedMode = "local";     // Runtime cache (refreshed before each request)
 let cachedRemoteConfig = null; // Runtime cache for remote config
 
@@ -67,7 +40,7 @@ function init(sm) {
  */
 async function refreshCache() {
   if (!stateManager) {
-    // No StateManager available - this is expected in degraded mode
+    // No StateManager available
     // Only allow local mode to continue (no remote dependency)
     // Remote mode MUST fail because we cannot verify state consistency
     if (cachedMode === "remote") {
@@ -86,9 +59,6 @@ async function refreshCache() {
     console.warn("[executor] StateManager not available, using local mode");
     return;
   }
-
-  // Assert StateManager is ready before using it
-  stateManager.assertReady();
 
   try {
     // Step 1: Get execution mode from StateManager (single source of truth)

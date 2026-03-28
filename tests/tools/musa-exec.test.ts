@@ -70,8 +70,6 @@ describe("musa-exec tools", () => {
 
   function createMockStateManagerWithHost() {
     return {
-      isReady: vi.fn().mockReturnValue(true),
-      assertReady: vi.fn().mockReturnValue(undefined),
       getExecutionMode: vi.fn().mockResolvedValue("remote"),
       getRemoteConfig: vi.fn().mockResolvedValue({
         host: "10.0.0.1",
@@ -143,8 +141,6 @@ describe("musa-exec tools", () => {
 
     it("should return local mode when no default host", async () => {
       const mockSM = {
-        isReady: vi.fn().mockReturnValue(true),
-        assertReady: vi.fn().mockReturnValue(undefined),
         getExecutionMode: vi.fn().mockResolvedValue("local"),
         getDefaultHost: vi.fn().mockResolvedValue(null),
         loadState: vi.fn().mockResolvedValue([]),
@@ -170,8 +166,6 @@ describe("musa-exec tools", () => {
   describe("Case 6: setDefaultHost validation", () => {
     it("should return error when setDefaultHost throws (host not found)", async () => {
       const mockSM = {
-        isReady: vi.fn().mockReturnValue(true),
-        assertReady: vi.fn().mockReturnValue(undefined),
         registerHost: vi.fn().mockResolvedValue("host_new"),
         setDefaultHost: vi.fn().mockRejectedValue(
           new Error('Cannot set default host: host with ID "non_existent" not found')
@@ -241,8 +235,6 @@ describe("musa-exec tools", () => {
 
     it("should set local mode successfully", async () => {
       const mockSM = {
-        isReady: vi.fn().mockReturnValue(true),
-        assertReady: vi.fn().mockReturnValue(undefined),
         clearDefaultHost: vi.fn().mockResolvedValue(undefined),
       }
       const mockApi = createMockApi()

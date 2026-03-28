@@ -231,9 +231,6 @@ export async function dispatch(
   params: DispatchParams,
   stateManager: StateManager
 ): Promise<DispatchResult> {
-  // Assert StateManager is ready at entry point
-  stateManager.assertReady()
-
   const { intent, context = {}, action = "start", force = false, query, mode = "normal", parentOperationId } = params
   const hostId = (context.hostId as string) || "local"
 

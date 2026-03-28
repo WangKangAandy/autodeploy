@@ -30,9 +30,6 @@ const CONTEXT_LIMITS = {
  * Build dynamic context string for prompt injection
  */
 export async function buildDynamicContext(stateManager: StateManager): Promise<string> {
-  // Assert StateManager is ready before using it
-  stateManager.assertReady()
-
   const snapshot = await stateManager.loadSnapshot()
 
   const lines: string[] = [
