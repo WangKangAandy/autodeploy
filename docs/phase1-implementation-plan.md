@@ -1,12 +1,14 @@
 # 第一阶段实施计划：仓库底座升级
 
-> **状态**: ✅ 核心功能已完成（2026-03-28 更新）
+> **状态**: ✅ 核心功能已完成（2026-03-29 更新）
 >
 > **已完成**:
 > - Skill 体系重构（11 个 skill）
 > - Dispatcher 层实现
 > - 状态管理统一
-> - 回归测试覆盖（157 个测试）
+> - Intent 元数据统一（P1-3 已解决）
+> - YAML 解析标准化（TD-1 已解决）
+> - 回归测试覆盖（172 个测试）
 >
 > **遗留问题**: 见第 5 节
 
@@ -107,16 +109,17 @@ skills/
 - [x] musa_get_mode 脱敏
 - [x] hosts.json 权限 600
 
-### 4.5 测试 ⏳
+### 4.5 测试 ✅
 
 - [x] dispatcher/document/executor 测试
-- [ ] 核心模块测试缺失（见 5.1 P1-2）
+- [x] 核心模块测试（state-manager-init 测试已补充）
+- [x] 172 个测试全部通过（2026-03-29）
 
 ---
 
 ## 5. 遗留问题与技术债
 
-> 2026-03-28 代码库审视发现
+> 2026-03-29 代码库审视更新
 
 ### 5.1 高优先级
 
@@ -130,64 +133,77 @@ skills/
 
 ---
 
-#### P1-2: 核心模块测试缺失
+#### P1-2: 核心模块测试缺失 ✅ 已补充
 
-| 模块 | 行数 | 风险 |
-|------|------|------|
-| state-manager.ts | 1,188 | 高 |
-| ssh-client.js | ~200 | 高 |
-| permission-gate.ts | ~80 | 高 |
-| context-builder.ts | ~200 | 中 |
-
-**建议**: 优先补充 state-manager 和 ssh-client 测试
+| 模块 | 行数 | 风险 | 状态 |
+|------|------|------|------|
+| state-manager.ts | 1,188 | 高 | ✅ state-manager-init.test.ts 已补充 |
+| ssh-client.js | ~200 | 高 | ⏳ 待补充 |
+| permission-gate.ts | ~80 | 高 | ✅ 已通过测试 |
+| context-builder.ts | ~200 | 中 | ⏳ 待补充 |
 
 ---
 
-#### P1-3: Intent 定义分散，工具 enum 未从唯一事实来源派生
+#### P1-3: Intent 定义分散，工具 enum 未从唯一事实来源派生 ✅ 已解决
 
 **问题**: `musa_dispatch` 工具的 intent enum 硬编码，与 `skills/index.yml` 不同步
 
 **现象**: 飞书用户请求"下载模型"时，AI 无法识别 `prepare_model` intent，直接调用底层工具绕过 dispatcher
 
-**当前状态**（2026-03-28 已临时修复 enum）:
-- `state-manager.ts` 类型定义：13 个 intent ✅
-- `intent-parser.ts` 模式匹配：完整 ✅
-- `router.ts` 路由逻辑：完整 ✅
-- `skills/index.yml` dispatch_intent：完整 ✅
-- `dispatcher/index.ts` enum：临时补全 ✅（仍为硬编码）
+**解决方案**（2026-03-29 已实施）:
 
-**根本原因**: 工具 enum 未从 `skills/index.yml` 派生
+1. **Intent 元数据统一**：`skills/index.yml` 成为单一事实源
+   - `dispatch_intent` → intent enum
+   - `risk_level` → INTENT_RISK
+   - `triggers` → INTENT_PATTERNS
+   - `description` → getIntentDescription()
 
-**方案 C（完整方案）**:
+2. **动态派生**：
+   - `getIntentList()` 从 skill registry 获取 intent 列表
+   - `dispatcher/index.ts` 动态构建 tool enum
+   - 新增 skill 时无需修改 dispatcher 代码
 
-```typescript
-// dispatcher/index.ts
-import { loadRegistry, getIntentList } from "./skill-registry.js"
-
-export function registerDispatcherTool(api: any, stateManager: StateManager): void {
-  loadRegistry()
-
-  // 从 skill-registry 动态构建 intent enum
-  const intentEnum = getIntentList()  // 新增：从 index.yml 派生
-
-  api.registerTool({
-    parameters: {
-      properties: {
-        intent: { enum: intentEnum }  // 动态生成
-      }
-    }
-  })
-}
-```
+3. **YAML 解析标准化**（TD-1）：
+   - 移除自定义 `parseSimpleYaml()`
+   - 使用标准 `yaml` 库解析
 
 **验收**:
-- [ ] skill-registry.ts 新增 `getIntentList()` 函数
-- [ ] dispatcher/index.ts 改为动态构建 enum
-- [ ] 新增 skill 时无需修改 dispatcher 代码
+- [x] skill-registry.ts 新增 `getIntentList()` 函数
+- [x] dispatcher/index.ts 改为动态构建 enum
+- [x] 新增 skill 时无需修改 dispatcher 代码
+- [x] 使用标准 yaml 库解析（TD-1 已解决）
 
 ---
 
-### 5.2 中优先级
+### 5.2 技术债清单
+
+#### TD-1: 自定义 YAML Parser 风险 ✅ 已解决
+
+**现状**: 已使用标准 `yaml` 库替换自定义 parser
+
+**收益**:
+- 嵌套对象正确解析（`inputs.required`、`depends_on`）
+- 删除 ~120 行自定义 parser 代码
+- 支持完整 YAML 特性
+
+#### TD-2: 字符串匹配召回不足
+
+**现状**: `parseIntent()` 采用 `query.includes(trigger.toLowerCase())` 字符串匹配
+
+**局限**:
+- 中文自然语言表达可能有召回不足
+- 触发词维护成本随 skill 增多而上升
+- 对复杂表达和模糊说法的鲁棒性弱于正则/向量方案
+
+**建议**:
+- 短期：支持 trigger 配置为正则表达式（向后兼容字符串）
+- 长期：考虑语义向量匹配或 LLM 意图分类
+
+**优先级**: 中
+
+---
+
+### 5.3 中优先级
 
 #### P2-1: utils 重复
 
