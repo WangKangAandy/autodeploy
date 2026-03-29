@@ -31,35 +31,39 @@ export function registerHooks(api: OpenClawAPI, stateManager: StateManager): voi
 
   // Dynamic context injection - highest priority
   // Note: priority is passed as second argument object in some OpenClaw versions
+  // CORRECT: Return prependSystemContext as a property (OpenClaw SDK pattern)
+  // TypeScript types may not reflect this, so we use type assertion
   try {
-    api.on("before_prompt_build", async (event: BeforePromptBuildEvent) => {
+    api.on("before_prompt_build", ((async (event: BeforePromptBuildEvent) => {
       try {
         // 1. Refresh executor cache from StateManager (ensures mode is up-to-date)
         await executor.refreshCache()
 
         // 2. Build and inject dynamic context
         const dynamicContext = await buildDynamicContext(stateManager)
-        event.prependSystemContext(dynamicContext)
         log("Dynamic context injected")
+        // Return prependSystemContext as object property (not calling a method)
+        return { prependSystemContext: dynamicContext }
       } catch (err) {
         api.logger.error?.(`[musa-adapter] Failed to build dynamic context: ${err}`)
       }
-    }, { priority: 100 })
+    }) as any), { priority: 100 })
   } catch {
     // Fallback for APIs that don't support priority
-    api.on("before_prompt_build", async (event: BeforePromptBuildEvent) => {
+    api.on("before_prompt_build", ((async (event: BeforePromptBuildEvent) => {
       try {
         // 1. Refresh executor cache from StateManager
         await executor.refreshCache()
 
         // 2. Build and inject dynamic context
         const dynamicContext = await buildDynamicContext(stateManager)
-        event.prependSystemContext(dynamicContext)
         log("Dynamic context injected")
+        // Return prependSystemContext as object property (not calling a method)
+        return { prependSystemContext: dynamicContext }
       } catch (err) {
         api.logger.error?.(`[musa-adapter] Failed to build dynamic context: ${err}`)
       }
-    })
+    }) as any))
   }
 
   // State persistence on session end
@@ -87,6 +91,13 @@ export function registerHooks(api: OpenClawAPI, stateManager: StateManager): voi
 }
 
 interface BeforePromptBuildEvent {
-  prependSystemContext: (content: string) => void
-  appendSystemContext?: (content: string) => void
+  // Event params - read-only
+  sessionId?: string
+  userId?: string
+}
+
+// Hook return type - prependSystemContext is a RETURN VALUE, not a method
+interface BeforePromptBuildResult {
+  prependSystemContext?: string
+  appendSystemContext?: string
 }
