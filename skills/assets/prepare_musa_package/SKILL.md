@@ -2,8 +2,8 @@
 version: 1
 name: prepare_musa_package
 description: |
-  Discover, download, and verify MUSA packages (driver, container_toolkit, SDK).
-  Checks local existence before downloading from MOSS or mirror.
+  Discover, download, and verify MUSA packages (driver, container_toolkit).
+  Checks local existence before downloading.
 
 category: assets
 kind: atomic
@@ -41,7 +41,6 @@ This atomic skill discovers, downloads, and verifies MUSA software packages. It 
 **Package Types:**
 - `driver` — MUSA GPU driver (musa_*.deb)
 - `container_toolkit` — MT Container Toolkit (mt-container-toolkit-*.zip)
-- `sdk` — MUSA SDK (musa-sdk_*.deb)
 
 ## Invocation
 
@@ -95,17 +94,16 @@ export MOSS_SECRET_KEY="your-secret-key"
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `PACKAGE_TYPE` | Package type: `driver` \| `container_toolkit` \| `sdk` | Yes | - |
+| `PACKAGE_TYPE` | Package type: `driver` \| `container_toolkit` | Yes | - |
 | `VERSION` | Version number (e.g., `3.3.5-server` for driver, `2.0.0` for container_toolkit) | Yes | - |
 | `SOURCE` | Download source: `moss` \| `local` \| `mirror` | No | `moss` |
-| `MUSA_SDK_VERSION` | SDK version for path construction | No* | - |
+| `MUSA_SDK_VERSION` | SDK version for MOSS path construction | No* | - |
 
 *Required if PACKAGE_TYPE is `driver` and SOURCE is `moss`.
 
 **Note on SOURCE**:
 - `driver`: Uses SOURCE parameter (moss/local/mirror)
 - `container_toolkit`: Ignores SOURCE, always downloads from configured HTTP URL
-- `sdk`: Uses SOURCE parameter
 
 ## Privileges Required
 
@@ -158,11 +156,6 @@ case "$PACKAGE_TYPE" in
                 break
             fi
         done
-        ;;
-    sdk)
-        if [ -f "./musa_packages/musa-sdk_${VERSION}_amd64.deb" ]; then
-            PACKAGE_PATH="./musa_packages/musa-sdk_${VERSION}_amd64.deb"
-        fi
         ;;
 esac
 
@@ -245,21 +238,6 @@ if [ -z "$PACKAGE_PATH" ]; then
             else
                 echo "Container toolkit config not found: $TOOLKIT_CONFIG"
             fi
-            ;;
-
-        sdk)
-            # SDK download (implementation depends on source)
-            case "$SOURCE" in
-                moss)
-                    echo "SDK download from MOSS not yet implemented"
-                    ;;
-                mirror)
-                    echo "Mirror download not yet implemented for SDK"
-                    ;;
-                local)
-                    echo "No local SDK package specified"
-                    ;;
-            esac
             ;;
     esac
 fi

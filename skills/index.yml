@@ -246,7 +246,7 @@ skills:
   - id: prepare_musa_package
     name: prepare_musa_package
     path: assets/prepare_musa_package/SKILL.md
-    description: Discover/download/verify MUSA packages (driver, container_toolkit, SDK)
+    description: Discover/download/verify MUSA packages (driver, container_toolkit)
     category: assets
     kind: atomic
     exposure: user
@@ -267,7 +267,7 @@ skills:
       - prepare container toolkit
     inputs:
       required:
-        - PACKAGE_TYPE  # driver | container_toolkit | sdk
+        - PACKAGE_TYPE  # driver | container_toolkit
         - VERSION
       optional:
         - SOURCE  # moss | local | mirror (ignored for container_toolkit)
