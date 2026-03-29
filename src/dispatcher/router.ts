@@ -92,6 +92,12 @@ function buildSkillMeta(skillId: string): { id: string; kind: "atomic" | "meta";
 
 export interface RouteResult {
   type: "skill" | "tool" | "direct" | "orchestration" | "error"
+  /**
+   * Logical target identifier only.
+   * - For type="skill": this MUST be the skill ID, not a file path.
+   * - For type="tool": this is the tool name.
+   * NEVER use this as a file path. Use readPath for file access.
+   */
   target: string
   params: Record<string, unknown>
   message: string
@@ -104,6 +110,12 @@ export interface RouteResult {
     kind: "atomic" | "meta"
     exposure: "user" | "internal"
   }
+  /**
+   * Skill routing fields (type="skill" only)
+   */
+  skillId?: string            // Skill identifier
+  description?: string        // Skill description from index.yml
+  readPath?: string           // Absolute path to skill file (auxiliary, use only when needed)
 }
 
 export interface RouterContext {
@@ -244,7 +256,10 @@ async function routeSkillById(
     const orchestration = getOrchestration(skillId)
     return {
       type: "orchestration",
-      target: skillPath,
+      target: skillId,
+      skillId,
+      description: meta.description,
+      readPath: skillPath,
       params: context,
       message: `Execute meta skill ${skillId} orchestration.`,
       orchestration: orchestration ? {
@@ -257,7 +272,10 @@ async function routeSkillById(
 
   return {
     type: "skill",
-    target: skillPath,
+    target: skillId,
+    skillId,
+    description: meta.description,
+    readPath: skillPath,
     params: context,
     message: `Execute atomic skill: ${skillId}`,
     skillMeta,
@@ -473,10 +491,14 @@ async function routePrepareModel(context: Record<string, unknown>): Promise<Rout
   const skillId = "prepare_model_artifacts"
   const skillPath = getSkillPath(skillId)
   const skillMeta = buildSkillMeta(skillId)
+  const meta = getSkillMeta(skillId)
 
   return {
     type: "skill",
-    target: skillPath!,
+    target: skillId,
+    skillId,
+    description: meta?.description,
+    readPath: skillPath!,
     params: context,
     message: buildSkillMessage(skillId),
     skillMeta,
@@ -490,10 +512,14 @@ async function routePrepareDataset(context: Record<string, unknown>): Promise<Ro
   const skillId = "prepare_dataset_artifacts"
   const skillPath = getSkillPath(skillId)
   const skillMeta = buildSkillMeta(skillId)
+  const meta = getSkillMeta(skillId)
 
   return {
     type: "skill",
-    target: skillPath!,
+    target: skillId,
+    skillId,
+    description: meta?.description,
+    readPath: skillPath!,
     params: context,
     message: buildSkillMessage(skillId),
     skillMeta,
@@ -507,10 +533,14 @@ async function routePreparePackage(context: Record<string, unknown>): Promise<Ro
   const skillId = "prepare_musa_package"
   const skillPath = getSkillPath(skillId)
   const skillMeta = buildSkillMeta(skillId)
+  const meta = getSkillMeta(skillId)
 
   return {
     type: "skill",
-    target: skillPath!,
+    target: skillId,
+    skillId,
+    description: meta?.description,
+    readPath: skillPath!,
     params: context,
     message: buildSkillMessage(skillId),
     skillMeta,
@@ -524,10 +554,14 @@ async function routeManageImages(context: Record<string, unknown>): Promise<Rout
   const skillId = "manage_container_images"
   const skillPath = getSkillPath(skillId)
   const skillMeta = buildSkillMeta(skillId)
+  const meta = getSkillMeta(skillId)
 
   return {
     type: "skill",
-    target: skillPath!,
+    target: skillId,
+    skillId,
+    description: meta?.description,
+    readPath: skillPath!,
     params: context,
     message: buildSkillMessage(skillId),
     skillMeta,
@@ -541,10 +575,14 @@ async function routePrepareRepo(context: Record<string, unknown>): Promise<Route
   const skillId = "prepare_dependency_repo"
   const skillPath = getSkillPath(skillId)
   const skillMeta = buildSkillMeta(skillId)
+  const meta = getSkillMeta(skillId)
 
   return {
     type: "skill",
-    target: skillPath!,
+    target: skillId,
+    skillId,
+    description: meta?.description,
+    readPath: skillPath!,
     params: context,
     message: buildSkillMessage(skillId),
     skillMeta,

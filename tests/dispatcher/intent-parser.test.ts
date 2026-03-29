@@ -156,24 +156,25 @@ describe("getIntentSkillPath", () => {
 })
 
 describe("getSkillPath", () => {
-  it("should return correct paths for meta skills", () => {
-    expect(getSkillPath("deploy_musa_base_env")).toBe("skills/env/deploy_musa_base_env/SKILL.md")
-    expect(getSkillPath("update_musa_driver")).toBe("skills/env/update_musa_driver/SKILL.md")
+  it("should return absolute paths for meta skills", () => {
+    const path = getSkillPath("deploy_musa_base_env")
+    expect(path).toContain("skills/env/deploy_musa_base_env/SKILL.md")
+    expect(path).toMatch(/^\//) // Absolute path starts with /
   })
 
-  it("should return correct paths for atomic env skills", () => {
-    expect(getSkillPath("ensure_system_dependencies")).toBe("skills/env/ensure_system_dependencies/SKILL.md")
-    expect(getSkillPath("ensure_musa_driver")).toBe("skills/env/ensure_musa_driver/SKILL.md")
-    expect(getSkillPath("ensure_mt_container_toolkit")).toBe("skills/env/ensure_mt_container_toolkit/SKILL.md")
-    expect(getSkillPath("manage_container_images")).toBe("skills/assets/manage_container_images/SKILL.md")
-    expect(getSkillPath("validate_musa_container_environment")).toBe("skills/env/validate_musa_container_environment/SKILL.md")
+  it("should return absolute paths for atomic env skills", () => {
+    expect(getSkillPath("ensure_system_dependencies")).toContain("skills/env/ensure_system_dependencies/SKILL.md")
+    expect(getSkillPath("ensure_musa_driver")).toContain("skills/env/ensure_musa_driver/SKILL.md")
+    expect(getSkillPath("ensure_mt_container_toolkit")).toContain("skills/env/ensure_mt_container_toolkit/SKILL.md")
+    expect(getSkillPath("manage_container_images")).toContain("skills/assets/manage_container_images/SKILL.md")
+    expect(getSkillPath("validate_musa_container_environment")).toContain("skills/env/validate_musa_container_environment/SKILL.md")
   })
 
-  it("should return correct paths for assets skills", () => {
-    expect(getSkillPath("prepare_musa_package")).toBe("skills/assets/prepare_musa_package/SKILL.md")
-    expect(getSkillPath("prepare_model_artifacts")).toBe("skills/assets/prepare_model_artifacts/SKILL.md")
-    expect(getSkillPath("prepare_dataset_artifacts")).toBe("skills/assets/prepare_dataset_artifacts/SKILL.md")
-    expect(getSkillPath("prepare_dependency_repo")).toBe("skills/assets/prepare_dependency_repo/SKILL.md")
+  it("should return absolute paths for assets skills", () => {
+    expect(getSkillPath("prepare_musa_package")).toContain("skills/assets/prepare_musa_package/SKILL.md")
+    expect(getSkillPath("prepare_model_artifacts")).toContain("skills/assets/prepare_model_artifacts/SKILL.md")
+    expect(getSkillPath("prepare_dataset_artifacts")).toContain("skills/assets/prepare_dataset_artifacts/SKILL.md")
+    expect(getSkillPath("prepare_dependency_repo")).toContain("skills/assets/prepare_dependency_repo/SKILL.md")
   })
 
   it("should return null for unknown skill IDs", () => {

@@ -108,6 +108,17 @@ function getIndexPath(): string {
 }
 
 /**
+ * Get plugin root directory
+ *
+ * Returns the absolute path to the plugin root, used for resolving
+ * skill file paths to absolute paths.
+ */
+function getPluginDir(): string {
+  // dist/dispatcher/skill-registry.js -> plugin root (two levels up)
+  return path.join(__dirname, "..", "..")
+}
+
+/**
  * Convert raw YAML skill (snake_case) to SkillMeta (camelCase)
  */
 function normalizeSkill(raw: RawSkillYaml): SkillMeta {
@@ -204,12 +215,15 @@ export function getSkillByIntent(intent: string): SkillMeta | null {
 }
 
 /**
- * Get skill path by ID
+ * Get skill path by ID (returns absolute path)
+ *
+ * Returns the absolute path to the skill file for use with file read operations.
+ * This ensures that consumers don't need to know the base directory.
  */
 export function getSkillPath(skillId: string): string | null {
   const meta = getSkillMeta(skillId)
   if (meta && meta.path) {
-    return `skills/${meta.path}`
+    return path.join(getPluginDir(), "skills", meta.path)
   }
   return null
 }

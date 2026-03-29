@@ -650,13 +650,32 @@ function buildGuidance(route: RouteResult, intent: Intent, action: string): stri
 
   lines.push(`## Dispatch Result`)
   lines.push("")
-  lines.push(`**Intent**: ${intent}`)
-  lines.push(`**Action**: ${action}`)
-  lines.push(`**Route Type**: ${route.type}`)
-  lines.push(`**Target**: ${route.target}`)
-  lines.push("")
+  lines.push(`**Type**: ${route.type}`)
 
-  if (route.type === "orchestration") {
+  // Skill routing: show structured info, readPath as auxiliary field
+  if (route.type === "skill" && route.skillId) {
+    lines.push(`**Skill**: ${route.skillId}`)
+    if (route.description) {
+      lines.push(`**Description**: ${route.description}`)
+    }
+    lines.push("")
+    lines.push("**Params**:")
+    lines.push(JSON.stringify(route.params, null, 2))
+    // readPath at the end, as auxiliary field
+    if (route.readPath) {
+      lines.push("")
+      lines.push("**Skill file (read only if needed)**:")
+      lines.push(route.readPath)
+    }
+  } else if (route.type === "orchestration") {
+    lines.push(`**Skill**: ${route.skillId || route.target}`)
+    if (route.description) {
+      lines.push(`**Description**: ${route.description}`)
+    }
+    lines.push("")
+    lines.push(`**Intent**: ${intent}`)
+    lines.push(`**Action**: ${action}`)
+    lines.push("")
     lines.push("### Orchestration Execution")
     lines.push("")
     lines.push(route.message)
@@ -668,30 +687,35 @@ function buildGuidance(route: RouteResult, intent: Intent, action: string): stri
       lines.push("The orchestrator will execute each atomic skill in sequence.")
       lines.push("Progress will be tracked in the operation state.")
     }
-    if (route.skillMeta) {
+    // readPath at the end, as auxiliary field
+    if (route.readPath) {
       lines.push("")
-      lines.push(`**Kind**: ${route.skillMeta.kind}`)
-      lines.push(`**Exposure**: ${route.skillMeta.exposure}`)
+      lines.push("**Skill file (read only if needed)**:")
+      lines.push(route.readPath)
     }
-  } else if (route.type === "skill") {
-    lines.push("### Next Steps")
+  } else {
+    // Other types: use original format
+    lines.push(`**Target**: ${route.target}`)
     lines.push("")
-    lines.push("Follow the skill workflow at the path above.")
-    lines.push("The skill will guide you through the deployment process.")
-    if (route.skillMeta) {
+    lines.push(`**Intent**: ${intent}`)
+    lines.push(`**Action**: ${action}`)
+    lines.push("")
+    if (route.type === "tool") {
+      lines.push("### Next Steps")
       lines.push("")
-      lines.push(`**Kind**: ${route.skillMeta.kind}`)
-      lines.push(`**Exposure**: ${route.skillMeta.exposure}`)
+      lines.push(`Execute the tool: ${route.target}`)
+      lines.push(`Parameters: ${JSON.stringify(route.params, null, 2)}`)
+    } else if (route.type === "direct") {
+      lines.push("### Direct Execution")
+      lines.push("")
+      lines.push(route.message)
     }
-  } else if (route.type === "tool") {
-    lines.push("### Next Steps")
+  }
+
+  if (route.skillMeta && route.type !== "orchestration") {
     lines.push("")
-    lines.push(`Execute the tool: ${route.target}`)
-    lines.push(`Parameters: ${JSON.stringify(route.params, null, 2)}`)
-  } else if (route.type === "direct") {
-    lines.push("### Direct Execution")
-    lines.push("")
-    lines.push(route.message)
+    lines.push(`**Kind**: ${route.skillMeta.kind}`)
+    lines.push(`**Exposure**: ${route.skillMeta.exposure}`)
   }
 
   return lines.join("\n")
