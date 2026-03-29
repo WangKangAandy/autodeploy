@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest"
 import {
   parseIntent,
+  parseIntentWithContext,
   getIntentDescription,
   getIntentSkillPath,
 } from "../../src/dispatcher/intent-parser"
@@ -69,6 +70,14 @@ describe("parseIntent", () => {
     expect(parseIntent("document execution")).toBe("execute_document")
   })
 
+  it("should parse execute_document from path in query (Layer 1)", () => {
+    // Layer 1: Strong structural signal - path with .md extension
+    expect(parseIntent("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
+    expect(parseIntent("/tmp/test.md")).toBe("execute_document")
+    expect(parseIntent("部署文档 ./docs/deploy.md")).toBe("execute_document")
+    expect(parseIntent("run deployment guide.md")).toBe("execute_document")
+  })
+
   it("should parse prepare_model intent", () => {
     expect(parseIntent("下载模型")).toBe("prepare_model")
     expect(parseIntent("准备模型")).toBe("prepare_model")
@@ -102,6 +111,45 @@ describe("parseIntent", () => {
     expect(parseIntent("hello world")).toBe("auto")
     expect(parseIntent("random text")).toBe("auto")
     expect(parseIntent("")).toBe("auto")
+  })
+})
+
+describe("parseIntentWithContext (Layer 1 detection)", () => {
+  it("should detect execute_document from context.path with .md extension", () => {
+    expect(parseIntentWithContext("执行", { path: "/tmp/deploy.md" })).toBe("execute_document")
+    expect(parseIntentWithContext("部署", { path: "./guide.markdown" })).toBe("execute_document")
+  })
+
+  it("should detect execute_document from context.content that looks like markdown", () => {
+    const markdownContent = `# Deployment Guide
+
+\`\`\`bash
+apt install docker
+\`\`\`
+
+- Step 1: Install driver
+- Step 2: Start container
+`
+    expect(parseIntentWithContext("执行", { content: markdownContent })).toBe("execute_document")
+  })
+
+  it("should detect execute_document from query containing .md path", () => {
+    // Query with path, no context needed
+    expect(parseIntentWithContext("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
+    expect(parseIntentWithContext("部署 /home/user/docs/guide.md")).toBe("execute_document")
+  })
+
+  it("should not detect execute_document for non-markdown paths", () => {
+    // Other intents should still work with proper triggers
+    expect(parseIntentWithContext("部署 MUSA 环境", { path: "/tmp/config.yml" })).toBe("deploy_env")
+    expect(parseIntentWithContext("更新驱动", {})).toBe("update_driver")
+  })
+
+  it("should still use Layer 2 & 3 when no structural signals", () => {
+    // No .md path, no markdown content - fall back to patterns
+    expect(parseIntentWithContext("部署 MUSA 环境", {})).toBe("deploy_env")
+    expect(parseIntentWithContext("更新驱动", {})).toBe("update_driver")
+    expect(parseIntentWithContext("GPU 状态", {})).toBe("gpu_status")
   })
 })
 

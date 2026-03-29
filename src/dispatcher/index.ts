@@ -6,7 +6,7 @@
  */
 
 import type { StateManager, Intent, Operation } from "../core/state-manager.js"
-import { parseIntent, getIntentDescription } from "./intent-parser.js"
+import { parseIntentWithContext, getIntentDescription } from "./intent-parser.js"
 import { routeToHandler, type RouteResult } from "./router.js"
 import { runPreFlightCheck, type CheckResult } from "./pre-check.js"
 import { checkPermission, type PermissionResult } from "./permission-gate.js"
@@ -70,7 +70,7 @@ const INTENT_TOTAL_STEPS: Partial<Record<Intent, number>> = {
   execute_document: 5, // load, parse, validate, review, execute
 }
 
-export { parseIntent, getIntentDescription } from "./intent-parser"
+export { parseIntent, parseIntentWithContext, getIntentDescription } from "./intent-parser"
 export { routeToHandler, type RouteResult } from "./router"
 export { runPreFlightCheck, type CheckResult } from "./pre-check"
 export { checkPermission, type PermissionResult } from "./permission-gate"
@@ -299,10 +299,10 @@ export async function dispatch(
     return internalDispatch(intent, context, parentOperationId, stateManager)
   }
 
-  // 1. Parse intent (auto mode)
+  // 1. Parse intent (auto mode) with context-aware detection
   let resolvedIntent = intent
   if (intent === "auto" && query) {
-    resolvedIntent = parseIntent(query)
+    resolvedIntent = parseIntentWithContext(query, context)
   }
 
   // 2. Classify operation risk level (lightweight, no side effects)

@@ -3,15 +3,17 @@
  *
  * Classifies user intent from natural language queries.
  *
- * Intent patterns are derived from skills/index.yml (skill.triggers).
- * This file provides fallback patterns for intents not backed by skills.
+ * Three-layer recognition:
+ * 1. Strong structural signals (path, content, markdown detection)
+ * 2. Skill triggers from registry (string matching)
+ * 3. Pattern fallback (regex)
  */
 
 import type { Intent } from "../core/state-manager"
 import { getSkillByIntent, getIntentToSkillMap, loadRegistry } from "./skill-registry"
 
 /**
- * Intent patterns for classification
+ * Intent patterns for classification (Layer 3 fallback)
  */
 const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
   deploy_env: [
@@ -69,15 +71,15 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
     /文件.*同步/i,
   ],
   execute_document: [
-    // 显式动作词 + 文档关键词组合
+    // Layer 3 patterns - only used if Layer 1 & 2 don't match
     /按文档.*(部署|执行|安装)/i,
-    /执行.*部署.*文档/i,      // "执行部署文档"
-    /执行.*文档/i,            // "执行文档"
+    /执行.*部署.*文档/i,
+    /执行.*文档/i,
     /根据文档.*部署/i,
     /按照.*文档.*操作/i,
     /文档驱动/i,
-    /部署文档/i,              // "部署文档"
-    /执行部署/i,              // "执行部署" + 有文档路径
+    /部署文档/i,
+    /执行部署/i,
     /document.*execution/i,
     /execute.*from.*document/i,
     /run.*deployment.*document/i,
@@ -135,23 +137,124 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
 }
 
 /**
- * Parse intent from a natural language query
+ * Markdown detection patterns
+ */
+const MARKDOWN_PATTERNS = [
+  /^#{1,6}\s+/m,           // Heading
+  /^```/m,                  // Code fence
+  /^\s*[-*+]\s+/m,         // List
+  /^\s*\d+\.\s+/m,         // Numbered list
+  /\[.+\]\(.+\)/,          // Link
+  /\*\*.+\*\*/,            // Bold
+]
+
+/**
+ * Check if content looks like markdown
+ */
+function looksLikeMarkdown(content: string): boolean {
+  // Check at least 2 markdown patterns
+  let matchCount = 0
+  for (const pattern of MARKDOWN_PATTERNS) {
+    if (pattern.test(content)) {
+      matchCount++
+      if (matchCount >= 2) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Check if string is a path ending with .md
+ */
+function isMarkdownPath(str: string): boolean {
+  // Match absolute paths, relative paths, or just filenames ending with .md
+  return /\.(md|markdown)$/i.test(str.trim())
+}
+
+/**
+ * Extract potential document paths from query
+ */
+function extractDocumentPaths(query: string): string[] {
+  const paths: string[] = []
+
+  // Absolute paths (Unix-style)
+  const absPathMatch = query.match(/(?:^|\s)(\/[^\s]+\.md(?:\.markdown)?)/gi)
+  if (absPathMatch) {
+    paths.push(...absPathMatch.map(m => m.trim()))
+  }
+
+  // Relative paths or filenames
+  const relPathMatch = query.match(/(?:^|\s)(?:\.\/)?[^\s]+\.md(?:\.markdown)?/gi)
+  if (relPathMatch) {
+    paths.push(...relPathMatch.map(m => m.trim()).filter(p => !paths.includes(p)))
+  }
+
+  return paths
+}
+
+/**
+ * Layer 1: Check strong structural signals for execute_document
+ *
+ * Returns true if any of these conditions are met:
+ * - context.path exists and ends with .md
+ * - context.content exists and looks like markdown
+ * - query contains an absolute path ending with .md
+ * - query contains any path ending with .md
+ */
+function checkDocumentStructuralSignals(
+  query: string,
+  context?: Record<string, unknown>
+): boolean {
+  // 1. context.path with .md extension
+  if (context?.path && typeof context.path === "string") {
+    if (isMarkdownPath(context.path)) {
+      return true
+    }
+  }
+
+  // 2. context.content looks like markdown
+  if (context?.content && typeof context.content === "string") {
+    if (looksLikeMarkdown(context.content)) {
+      return true
+    }
+  }
+
+  // 3. Query contains document paths
+  const docPaths = extractDocumentPaths(query)
+  if (docPaths.length > 0) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Parse intent with context (three-layer recognition)
  *
  * Priority:
- * 1. Skill triggers from registry (string matching, case-insensitive)
- * 2. INTENT_PATTERNS fallback for non-skill intents
- * 3. "auto" as default
+ * 1. Strong structural signals (execute_document detection)
+ * 2. Skill triggers from registry (string matching)
+ * 3. INTENT_PATTERNS fallback
+ * 4. "auto" as default
  */
-export function parseIntent(query: string): Intent {
+export function parseIntentWithContext(
+  query: string,
+  context?: Record<string, unknown>
+): Intent {
   loadRegistry()
   const intentToSkill = getIntentToSkillMap()
   const queryLower = query.toLowerCase()
 
-  // 1. Check skill triggers from registry (string matching)
+  // Layer 1: Strong structural signals for execute_document
+  // This takes highest priority because it's based on explicit signals
+  if (checkDocumentStructuralSignals(query, context)) {
+    return "execute_document"
+  }
+
+  // Layer 2: Check skill triggers from registry (string matching)
   for (const [intent, skill] of intentToSkill.entries()) {
     if (skill.triggers) {
       for (const trigger of skill.triggers) {
-        // String matching (case-insensitive)
         if (queryLower.includes(trigger.toLowerCase())) {
           return intent as Intent
         }
@@ -159,8 +262,7 @@ export function parseIntent(query: string): Intent {
     }
   }
 
-  // 2. Fallback to INTENT_PATTERNS for non-skill intents
-  // These are: gpu_status, validate, sync, run_container, execute_document
+  // Layer 3: Fallback to INTENT_PATTERNS for non-skill intents
   const nonSkillIntents: Intent[] = [
     "gpu_status", "validate", "sync", "run_container", "execute_document"
   ]
@@ -176,8 +278,18 @@ export function parseIntent(query: string): Intent {
     }
   }
 
-  // 3. Default to auto for unknown queries
+  // Default to auto
   return "auto"
+}
+
+/**
+ * Parse intent from query only (backward compatible)
+ *
+ * For use when context is not available.
+ * Delegates to parseIntentWithContext with undefined context.
+ */
+export function parseIntent(query: string): Intent {
+  return parseIntentWithContext(query, undefined)
 }
 
 /**
@@ -201,13 +313,11 @@ export function parseIntentFromKeywords(keywords: string[]): Intent {
  * Falls back to hardcoded descriptions for non-skill intents.
  */
 export function getIntentDescription(intent: Intent): string {
-  // 1. Try skill registry first
   const skill = getIntentToSkillMap().get(intent)
   if (skill?.description) {
     return skill.description
   }
 
-  // 2. Fallback for non-skill intents
   switch (intent) {
     case "gpu_status":
       return "Check GPU status with mthreads-gmi"
