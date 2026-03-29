@@ -71,11 +71,19 @@ describe("parseIntent", () => {
   })
 
   it("should parse execute_document from path in query (Layer 1)", () => {
-    // Layer 1: Strong structural signal - path with .md extension
+    // Layer 1: Strong structural signal + action word - path with .md extension
     expect(parseIntent("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
-    expect(parseIntent("/tmp/test.md")).toBe("execute_document")
     expect(parseIntent("部署文档 ./docs/deploy.md")).toBe("execute_document")
     expect(parseIntent("run deployment guide.md")).toBe("execute_document")
+    expect(parseIntent("执行 /tmp/test.markdown")).toBe("execute_document")
+  })
+
+  it("should NOT detect execute_document from path without action word", () => {
+    // Path alone is not enough - need action word too
+    expect(parseIntent("/tmp/test.md")).toBe("auto")
+    expect(parseIntent("看一下 README.md")).toBe("auto")
+    expect(parseIntent("这个 guide.md 怎么写")).toBe("auto")
+    expect(parseIntent("总结 document.md 内容")).toBe("auto")
   })
 
   it("should parse prepare_model intent", () => {
@@ -115,12 +123,21 @@ describe("parseIntent", () => {
 })
 
 describe("parseIntentWithContext (Layer 1 detection)", () => {
-  it("should detect execute_document from context.path with .md extension", () => {
+  it("should detect execute_document from context.path with .md extension + action", () => {
+    // Need both: .md path + action word
     expect(parseIntentWithContext("执行", { path: "/tmp/deploy.md" })).toBe("execute_document")
     expect(parseIntentWithContext("部署", { path: "./guide.markdown" })).toBe("execute_document")
+    expect(parseIntentWithContext("根据文档", { path: "/tmp/guide.md" })).toBe("execute_document")
   })
 
-  it("should detect execute_document from context.content that looks like markdown", () => {
+  it("should NOT detect execute_document from path without action word", () => {
+    // Path alone is not enough
+    expect(parseIntentWithContext("看一下", { path: "/tmp/deploy.md" })).toBe("auto")
+    expect(parseIntentWithContext("总结", { path: "./guide.markdown" })).toBe("auto")
+    expect(parseIntentWithContext("解释", { path: "/tmp/guide.md" })).toBe("auto")
+  })
+
+  it("should detect execute_document from context.content that looks like markdown + action", () => {
     const markdownContent = `# Deployment Guide
 
 \`\`\`bash
@@ -130,13 +147,28 @@ apt install docker
 - Step 1: Install driver
 - Step 2: Start container
 `
+    // Need action word
     expect(parseIntentWithContext("执行", { content: markdownContent })).toBe("execute_document")
+    expect(parseIntentWithContext("部署", { content: markdownContent })).toBe("execute_document")
   })
 
-  it("should detect execute_document from query containing .md path", () => {
-    // Query with path, no context needed
+  it("should NOT detect execute_document from markdown content without action", () => {
+    const markdownContent = `# Deployment Guide
+
+\`\`\`bash
+apt install docker
+\`\`\`
+`
+    // No action word - should not be execute_document
+    expect(parseIntentWithContext("看一下", { content: markdownContent })).toBe("auto")
+    expect(parseIntentWithContext("解释", { content: markdownContent })).toBe("auto")
+  })
+
+  it("should detect execute_document from query containing .md path + action", () => {
+    // Query with path + action
     expect(parseIntentWithContext("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
     expect(parseIntentWithContext("部署 /home/user/docs/guide.md")).toBe("execute_document")
+    expect(parseIntentWithContext("根据 guide.md 部署", {})).toBe("execute_document")
   })
 
   it("should not detect execute_document for non-markdown paths", () => {

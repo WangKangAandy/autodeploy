@@ -4,13 +4,50 @@
  * Classifies user intent from natural language queries.
  *
  * Three-layer recognition:
- * 1. Strong structural signals (path, content, markdown detection)
+ * 1. Strong structural signals + action words (path, content, markdown + execution action)
  * 2. Skill triggers from registry (string matching)
  * 3. Pattern fallback (regex)
  */
 
 import type { Intent } from "../core/state-manager"
 import { getSkillByIntent, getIntentToSkillMap, loadRegistry } from "./skill-registry"
+
+/**
+ * Markdown file extension pattern (unified)
+ * Matches: .md or .markdown (case insensitive)
+ */
+const MARKDOWN_EXT_PATTERN = /\.(?:md|markdown)$/i
+
+/**
+ * Markdown path extraction pattern
+ * Matches absolute paths, relative paths, or filenames ending with .md or .markdown
+ */
+const MARKDOWN_PATH_PATTERN = /(?:^|\s)(?:(?:\.\/|\/)?[^\s]+?\.(?:md|markdown))(?=\s|$)/gi
+
+/**
+ * Execution action patterns
+ * These indicate the user wants to execute/run/deploy something
+ */
+const EXEC_ACTION_PATTERNS = [
+  /执行/i,
+  /部署/i,
+  /安装/i,
+  /运行/i,
+  /根据/i,
+  /按照/i,
+  /apply/i,
+  /execute/i,
+  /deploy/i,
+  /install/i,
+  /run/i,
+]
+
+/**
+ * Check if query contains execution action words
+ */
+function hasExecutionAction(query: string): boolean {
+  return EXEC_ACTION_PATTERNS.some(p => p.test(query))
+}
 
 /**
  * Intent patterns for classification (Layer 3 fallback)
@@ -139,7 +176,7 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
 /**
  * Markdown detection patterns
  */
-const MARKDOWN_PATTERNS = [
+const MARKDOWN_CONTENT_PATTERNS = [
   /^#{1,6}\s+/m,           // Heading
   /^```/m,                  // Code fence
   /^\s*[-*+]\s+/m,         // List
@@ -149,12 +186,12 @@ const MARKDOWN_PATTERNS = [
 ]
 
 /**
- * Check if content looks like markdown
+ * Check if content looks like markdown (requires multiple signals)
  */
 function looksLikeMarkdown(content: string): boolean {
-  // Check at least 2 markdown patterns
+  // Require at least 2 markdown patterns to avoid false positives
   let matchCount = 0
-  for (const pattern of MARKDOWN_PATTERNS) {
+  for (const pattern of MARKDOWN_CONTENT_PATTERNS) {
     if (pattern.test(content)) {
       matchCount++
       if (matchCount >= 2) return true
@@ -164,48 +201,48 @@ function looksLikeMarkdown(content: string): boolean {
 }
 
 /**
- * Check if string is a path ending with .md
+ * Check if string is a path ending with .md or .markdown
  */
 function isMarkdownPath(str: string): boolean {
-  // Match absolute paths, relative paths, or just filenames ending with .md
-  return /\.(md|markdown)$/i.test(str.trim())
+  return MARKDOWN_EXT_PATTERN.test(str.trim())
 }
 
 /**
  * Extract potential document paths from query
+ * Returns paths ending with .md or .markdown
  */
 function extractDocumentPaths(query: string): string[] {
   const paths: string[] = []
-
-  // Absolute paths (Unix-style)
-  const absPathMatch = query.match(/(?:^|\s)(\/[^\s]+\.md(?:\.markdown)?)/gi)
-  if (absPathMatch) {
-    paths.push(...absPathMatch.map(m => m.trim()))
+  const matches = query.match(MARKDOWN_PATH_PATTERN)
+  if (matches) {
+    paths.push(...matches.map(m => m.trim()))
   }
-
-  // Relative paths or filenames
-  const relPathMatch = query.match(/(?:^|\s)(?:\.\/)?[^\s]+\.md(?:\.markdown)?/gi)
-  if (relPathMatch) {
-    paths.push(...relPathMatch.map(m => m.trim()).filter(p => !paths.includes(p)))
-  }
-
   return paths
 }
 
 /**
  * Layer 1: Check strong structural signals for execute_document
  *
- * Returns true if any of these conditions are met:
- * - context.path exists and ends with .md
- * - context.content exists and looks like markdown
- * - query contains an absolute path ending with .md
- * - query contains any path ending with .md
+ * Requires BOTH structural signal AND execution action:
+ * - (context.path is .md OR query has .md path OR content is markdown) AND has action word
+ *
+ * This prevents false positives like "看一下 README.md" being treated as execute_document.
  */
 function checkDocumentStructuralSignals(
   query: string,
   context?: Record<string, unknown>
 ): boolean {
-  // 1. context.path with .md extension
+  // First check if there's an execution action
+  const hasAction = hasExecutionAction(query)
+
+  // No action word, don't treat as execute_document even with .md path
+  if (!hasAction) {
+    return false
+  }
+
+  // Has action word, now check structural signals
+
+  // 1. context.path with .md/.markdown extension
   if (context?.path && typeof context.path === "string") {
     if (isMarkdownPath(context.path)) {
       return true
@@ -219,7 +256,7 @@ function checkDocumentStructuralSignals(
     }
   }
 
-  // 3. Query contains document paths
+  // 3. Query contains document paths ending with .md/.markdown
   const docPaths = extractDocumentPaths(query)
   if (docPaths.length > 0) {
     return true
@@ -232,7 +269,7 @@ function checkDocumentStructuralSignals(
  * Parse intent with context (three-layer recognition)
  *
  * Priority:
- * 1. Strong structural signals (execute_document detection)
+ * 1. Strong structural signals + action words (execute_document detection)
  * 2. Skill triggers from registry (string matching)
  * 3. INTENT_PATTERNS fallback
  * 4. "auto" as default
@@ -245,7 +282,7 @@ export function parseIntentWithContext(
   const intentToSkill = getIntentToSkillMap()
   const queryLower = query.toLowerCase()
 
-  // Layer 1: Strong structural signals for execute_document
+  // Layer 1: Strong structural signals + action words for execute_document
   // This takes highest priority because it's based on explicit signals
   if (checkDocumentStructuralSignals(query, context)) {
     return "execute_document"
