@@ -63,27 +63,11 @@ describe("parseIntent", () => {
     expect(parseIntent("同步文件")).toBe("sync")
   })
 
-  it("should parse execute_document intent", () => {
+  it("should parse execute_document intent (Layer 3 fallback)", () => {
     expect(parseIntent("按文档部署")).toBe("execute_document")
     expect(parseIntent("执行文档")).toBe("execute_document")
     expect(parseIntent("根据文档部署")).toBe("execute_document")
     expect(parseIntent("document execution")).toBe("execute_document")
-  })
-
-  it("should parse execute_document from path in query (Layer 1)", () => {
-    // Layer 1: Strong structural signal + action word - path with .md extension
-    expect(parseIntent("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
-    expect(parseIntent("部署文档 ./docs/deploy.md")).toBe("execute_document")
-    expect(parseIntent("run deployment guide.md")).toBe("execute_document")
-    expect(parseIntent("执行 /tmp/test.markdown")).toBe("execute_document")
-  })
-
-  it("should NOT detect execute_document from path without action word", () => {
-    // Path alone is not enough - need action word too
-    expect(parseIntent("/tmp/test.md")).toBe("auto")
-    expect(parseIntent("看一下 README.md")).toBe("auto")
-    expect(parseIntent("这个 guide.md 怎么写")).toBe("auto")
-    expect(parseIntent("总结 document.md 内容")).toBe("auto")
   })
 
   it("should parse prepare_model intent", () => {
@@ -105,9 +89,6 @@ describe("parseIntent", () => {
     expect(parseIntent("下载 MUSA 包")).toBe("prepare_package")
   })
 
-  // NOTE: manage_images is NOT a dispatch_intent - manage_container_images skill has no dispatch_intent
-  // It's accessed via direct tool routing, not through dispatcher
-
   it("should parse prepare_repo intent", () => {
     expect(parseIntent("克隆仓库")).toBe("prepare_repo")
     expect(parseIntent("准备代码")).toBe("prepare_repo")
@@ -122,72 +103,125 @@ describe("parseIntent", () => {
   })
 })
 
-describe("parseIntentWithContext (Layer 1 detection)", () => {
-  it("should detect execute_document from context.path with .md extension + action", () => {
-    // Need both: .md path + action word
-    expect(parseIntentWithContext("执行", { path: "/tmp/deploy.md" })).toBe("execute_document")
-    expect(parseIntentWithContext("部署", { path: "./guide.markdown" })).toBe("execute_document")
-    expect(parseIntentWithContext("根据文档", { path: "/tmp/guide.md" })).toBe("execute_document")
+describe("execute_document scoring system (Layer 1)", () => {
+  describe("Strong hits (score >= 5)", () => {
+    it("should hit: absolute path + strong action", () => {
+      // action (3) + absolute path (3) = 6 >= 5
+      expect(parseIntent("执行 /tmp/deploy.md")).toBe("execute_document")
+      expect(parseIntent("部署 /home/user/guide.md")).toBe("execute_document")
+      expect(parseIntent("run /tmp/test.markdown")).toBe("execute_document")
+    })
+
+    it("should hit: relative path + strong action", () => {
+      // action (3) + relative path (2) = 5 >= 5
+      expect(parseIntent("执行 ./docs/deploy.md")).toBe("execute_document")
+      expect(parseIntent("部署 ../config/guide.md")).toBe("execute_document")
+    })
+
+    it("should hit: context.path (absolute) + strong action", () => {
+      // action (3) + absolute path from context (3) = 6 >= 5
+      expect(parseIntentWithContext("执行", { path: "/tmp/deploy.md" })).toBe("execute_document")
+      expect(parseIntentWithContext("部署", { path: "/home/user/guide.md" })).toBe("execute_document")
+    })
+
+    it("should hit: context.path (relative) + strong action", () => {
+      // action (3) + relative path from context (2) = 5 >= 5
+      expect(parseIntentWithContext("执行", { path: "./docs/deploy.md" })).toBe("execute_document")
+      expect(parseIntentWithContext("部署", { path: "../config/guide.md" })).toBe("execute_document")
+    })
+
+    it("should hit: weak guide + exec-related word + relative path", () => {
+      // weak guide (1) + exec-related (2) + relative path (2) = 5 >= 5
+      expect(parseIntent("按照 ./guide.md 执行")).toBe("execute_document")
+      expect(parseIntent("根据 ../deploy.md 部署")).toBe("execute_document")
+    })
+
+    it("should hit: weak guide + exec-related word + absolute path", () => {
+      // weak guide (1) + exec-related (2) + absolute path (3) = 6 >= 5
+      expect(parseIntent("根据 /tmp/deploy.md 部署")).toBe("execute_document")
+    })
   })
 
-  it("should NOT detect execute_document from path without action word", () => {
-    // Path alone is not enough
-    expect(parseIntentWithContext("看一下", { path: "/tmp/deploy.md" })).toBe("auto")
-    expect(parseIntentWithContext("总结", { path: "./guide.markdown" })).toBe("auto")
-    expect(parseIntentWithContext("解释", { path: "/tmp/guide.md" })).toBe("auto")
+  describe("Should NOT hit (score < 5)", () => {
+    it("should NOT hit: path without action (no action = 0 score)", () => {
+      // no action = 0 score (path not counted)
+      expect(parseIntent("/tmp/deploy.md")).toBe("auto")
+      expect(parseIntent("/home/user/guide.md")).toBe("auto")
+      expect(parseIntent("./docs/deploy.md")).toBe("auto")
+    })
+
+    it("should NOT hit: path + non-exec action (no action = 0 score)", () => {
+      // no action = 0 score (path not counted)
+      expect(parseIntent("看一下 /tmp/deploy.md")).toBe("auto")
+      expect(parseIntent("总结 /home/user/guide.md")).toBe("auto")
+      expect(parseIntent("解释 README.md 内容")).toBe("auto")
+    })
+
+    it("should NOT hit: bare filename + strong action", () => {
+      // action (3) + bare filename (1) = 4 < 5
+      expect(parseIntent("执行 deploy.md")).toBe("auto")
+      expect(parseIntent("部署 guide.md")).toBe("auto")
+    })
+
+    it("should NOT hit: weak guide without exec-related word", () => {
+      // weak guide (1) = 1 < 5 (no path counted because action score is too low)
+      expect(parseIntent("根据 README.md 解释一下配置项")).toBe("auto")
+      expect(parseIntent("按照 guide.md 总结流程")).toBe("auto")
+    })
+
+    it("should NOT hit: weak guide + exec-related + bare filename", () => {
+      // weak guide (1) + exec-related (2) + bare filename (1) = 4 < 5
+      expect(parseIntent("根据 deploy.md 部署")).toBe("auto")
+      expect(parseIntent("按照 guide.md 执行")).toBe("auto")
+    })
+
+    it("should NOT hit: bare filename + weak action", () => {
+      // no action = 0 score
+      expect(parseIntent("这个 guide.md 怎么写")).toBe("auto")
+    })
   })
 
-  it("should detect execute_document from context.content that looks like markdown + action", () => {
-    const markdownContent = `# Deployment Guide
+  describe("Edge cases", () => {
+    it("should handle .markdown extension", () => {
+      expect(parseIntent("执行 /tmp/deploy.markdown")).toBe("execute_document")
+      expect(parseIntent("部署 ./guide.markdown")).toBe("execute_document")
+    })
+
+    it("should not trigger on non-markdown paths", () => {
+      expect(parseIntent("执行 /tmp/config.yml")).toBe("auto")
+      expect(parseIntent("部署 config.json")).toBe("auto")
+    })
+
+    it("should work with context.content + action", () => {
+      const markdownContent = `# Deployment Guide
 
 \`\`\`bash
 apt install docker
 \`\`\`
 
 - Step 1: Install driver
-- Step 2: Start container
 `
-    // Need action word
-    expect(parseIntentWithContext("执行", { content: markdownContent })).toBe("execute_document")
-    expect(parseIntentWithContext("部署", { content: markdownContent })).toBe("execute_document")
-  })
+      // action (3) + markdown content (2) = 5 >= 5
+      expect(parseIntentWithContext("执行", { content: markdownContent })).toBe("execute_document")
+      expect(parseIntentWithContext("部署", { content: markdownContent })).toBe("execute_document")
+    })
 
-  it("should NOT detect execute_document from markdown content without action", () => {
-    const markdownContent = `# Deployment Guide
+    it("should NOT trigger on markdown content without action", () => {
+      const markdownContent = `# Deployment Guide
 
 \`\`\`bash
 apt install docker
 \`\`\`
 `
-    // No action word - should not be execute_document
-    expect(parseIntentWithContext("看一下", { content: markdownContent })).toBe("auto")
-    expect(parseIntentWithContext("解释", { content: markdownContent })).toBe("auto")
-  })
-
-  it("should detect execute_document from query containing .md path + action", () => {
-    // Query with path + action
-    expect(parseIntentWithContext("执行部署文档 /tmp/wan22-deploy-full.md")).toBe("execute_document")
-    expect(parseIntentWithContext("部署 /home/user/docs/guide.md")).toBe("execute_document")
-    expect(parseIntentWithContext("根据 guide.md 部署", {})).toBe("execute_document")
-  })
-
-  it("should not detect execute_document for non-markdown paths", () => {
-    // Other intents should still work with proper triggers
-    expect(parseIntentWithContext("部署 MUSA 环境", { path: "/tmp/config.yml" })).toBe("deploy_env")
-    expect(parseIntentWithContext("更新驱动", {})).toBe("update_driver")
-  })
-
-  it("should still use Layer 2 & 3 when no structural signals", () => {
-    // No .md path, no markdown content - fall back to patterns
-    expect(parseIntentWithContext("部署 MUSA 环境", {})).toBe("deploy_env")
-    expect(parseIntentWithContext("更新驱动", {})).toBe("update_driver")
-    expect(parseIntentWithContext("GPU 状态", {})).toBe("gpu_status")
+      // no action = 0 score
+      expect(parseIntentWithContext("看一下", { content: markdownContent })).toBe("auto")
+      expect(parseIntentWithContext("解释", { content: markdownContent })).toBe("auto")
+    })
   })
 })
 
 describe("getIntentDescription", () => {
   it("should return description for skill-backed intents (from skill registry)", () => {
-    // Descriptions now come from skills/index.yml
     expect(getIntentDescription("deploy_env")).toContain("MUSA environment")
     expect(getIntentDescription("update_driver")).toContain("driver")
     expect(getIntentDescription("prepare_model")).toContain("model")
@@ -197,7 +231,6 @@ describe("getIntentDescription", () => {
   })
 
   it("should return description for non-skill intents (fallback)", () => {
-    // These are hardcoded fallbacks for intents without skills
     expect(getIntentDescription("gpu_status")).toContain("Check GPU status")
     expect(getIntentDescription("run_container")).toContain("Run a Docker container")
     expect(getIntentDescription("validate")).toContain("Validate MUSA")
@@ -239,7 +272,7 @@ describe("getSkillPath", () => {
   it("should return absolute paths for meta skills", () => {
     const path = getSkillPath("deploy_musa_base_env")
     expect(path).toContain("skills/env/deploy_musa_base_env/SKILL.md")
-    expect(path).toMatch(/^\//) // Absolute path starts with /
+    expect(path).toMatch(/^\//)
   })
 
   it("should return absolute paths for atomic env skills", () => {

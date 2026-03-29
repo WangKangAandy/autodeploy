@@ -4,7 +4,7 @@
  * Classifies user intent from natural language queries.
  *
  * Three-layer recognition:
- * 1. Strong structural signals + action words (path, content, markdown + execution action)
+ * 1. Scoring system for execute_document (path type + action type)
  * 2. Skill triggers from registry (string matching)
  * 3. Pattern fallback (regex)
  */
@@ -12,46 +12,87 @@
 import type { Intent } from "../core/state-manager"
 import { getSkillByIntent, getIntentToSkillMap, loadRegistry } from "./skill-registry"
 
+// =============================================================================
+// Constants for execute_document detection
+// =============================================================================
+
 /**
  * Markdown file extension pattern (unified)
- * Matches: .md or .markdown (case insensitive)
  */
 const MARKDOWN_EXT_PATTERN = /\.(?:md|markdown)$/i
 
 /**
- * Markdown path extraction pattern
- * Matches absolute paths, relative paths, or filenames ending with .md or .markdown
+ * Strong execution action patterns
+ * These directly indicate execution intent
  */
-const MARKDOWN_PATH_PATTERN = /(?:^|\s)(?:(?:\.\/|\/)?[^\s]+?\.(?:md|markdown))(?=\s|$)/gi
-
-/**
- * Execution action patterns
- * These indicate the user wants to execute/run/deploy something
- */
-const EXEC_ACTION_PATTERNS = [
+const STRONG_EXEC_ACTIONS = [
   /执行/i,
   /部署/i,
   /安装/i,
   /运行/i,
-  /根据/i,
-  /按照/i,
-  /apply/i,
   /execute/i,
   /deploy/i,
   /install/i,
   /run/i,
+  /apply/i,
 ]
 
 /**
- * Check if query contains execution action words
+ * Weak guide words (reference indicators)
+ * These need to be combined with execution-related words
  */
-function hasExecutionAction(query: string): boolean {
-  return EXEC_ACTION_PATTERNS.some(p => p.test(query))
-}
+const WEAK_GUIDE_WORDS = [
+  /根据/i,
+  /按照/i,
+]
 
 /**
- * Intent patterns for classification (Layer 3 fallback)
+ * Execution-related words that can combine with weak guide words
  */
+const EXEC_RELATED_WORDS = [
+  /部署/i,
+  /执行/i,
+  /安装/i,
+  /运行/i,
+  /操作/i,
+  /配置/i,
+  /环境/i,
+  /步骤/i,
+  /流程/i,
+  /deploy/i,
+  /execute/i,
+  /install/i,
+  /setup/i,
+  /run/i,
+]
+
+/**
+ * Scoring thresholds
+ */
+const SCORE_THRESHOLD = 5  // Need at least 5 points to trigger execute_document
+
+/**
+ * Score weights
+ */
+const SCORE_WEIGHTS = {
+  // Path types
+  ABSOLUTE_PATH: 3,      // /tmp/guide.md
+  RELATIVE_PATH: 2,      // ./docs/guide.md or ../guide.md
+  BARE_FILENAME: 1,      // guide.md (just filename, no path prefix)
+
+  // Content types
+  MARKDOWN_CONTENT: 2,   // context.content looks like markdown
+
+  // Action types
+  STRONG_ACTION: 3,      // 执行/部署/安装/运行
+  WEAK_GUIDE: 1,         // 根据/按照 (needs exec-related word)
+  EXEC_RELATED: 2,       // 部署/执行/安装 (when combined with weak guide)
+}
+
+// =============================================================================
+// Intent patterns for Layer 3 fallback
+// =============================================================================
+
 const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
   deploy_env: [
     /部署.*环境/i,
@@ -108,7 +149,6 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
     /文件.*同步/i,
   ],
   execute_document: [
-    // Layer 3 patterns - only used if Layer 1 & 2 don't match
     /按文档.*(部署|执行|安装)/i,
     /执行.*部署.*文档/i,
     /执行.*文档/i,
@@ -173,8 +213,12 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
   auto: [],
 }
 
+// =============================================================================
+// Helper functions
+// =============================================================================
+
 /**
- * Markdown detection patterns
+ * Markdown content detection patterns
  */
 const MARKDOWN_CONTENT_PATTERNS = [
   /^#{1,6}\s+/m,           // Heading
@@ -189,7 +233,6 @@ const MARKDOWN_CONTENT_PATTERNS = [
  * Check if content looks like markdown (requires multiple signals)
  */
 function looksLikeMarkdown(content: string): boolean {
-  // Require at least 2 markdown patterns to avoid false positives
   let matchCount = 0
   for (const pattern of MARKDOWN_CONTENT_PATTERNS) {
     if (pattern.test(content)) {
@@ -201,75 +244,198 @@ function looksLikeMarkdown(content: string): boolean {
 }
 
 /**
- * Check if string is a path ending with .md or .markdown
+ * Check if string is a markdown path (.md or .markdown)
  */
 function isMarkdownPath(str: string): boolean {
   return MARKDOWN_EXT_PATTERN.test(str.trim())
 }
 
 /**
- * Extract potential document paths from query
- * Returns paths ending with .md or .markdown
+ * Path type classification
  */
-function extractDocumentPaths(query: string): string[] {
-  const paths: string[] = []
-  const matches = query.match(MARKDOWN_PATH_PATTERN)
-  if (matches) {
-    paths.push(...matches.map(m => m.trim()))
+type PathType = "absolute" | "relative" | "bare" | "none"
+
+/**
+ * Classify path type and extract the path
+ * Returns the path and its type
+ */
+function classifyPath(path: string): { path: string; type: PathType } {
+  const trimmed = path.trim()
+
+  // Absolute path: starts with /
+  if (trimmed.startsWith("/")) {
+    return { path: trimmed, type: "absolute" }
   }
-  return paths
+
+  // Relative path: starts with ./ or ../
+  if (trimmed.startsWith("./") || trimmed.startsWith("../")) {
+    return { path: trimmed, type: "relative" }
+  }
+
+  // Bare filename
+  return { path: trimmed, type: "bare" }
 }
 
 /**
- * Layer 1: Check strong structural signals for execute_document
- *
- * Requires BOTH structural signal AND execution action:
- * - (context.path is .md OR query has .md path OR content is markdown) AND has action word
- *
- * This prevents false positives like "看一下 README.md" being treated as execute_document.
+ * Extract and classify markdown paths from query
  */
-function checkDocumentStructuralSignals(
+function extractMarkdownPaths(query: string): Array<{ path: string; type: PathType }> {
+  const results: Array<{ path: string; type: PathType }> = []
+
+  // Match paths with .md or .markdown extension
+  // Pattern: optional path prefix + filename + .md/.markdown
+  const pattern = /(?:^|\s)((?:\.?\.?\/)?[^\s]*?\.(?:md|markdown))(?=\s|$)/gi
+  const matches = query.match(pattern)
+
+  if (matches) {
+    for (const match of matches) {
+      const trimmed = match.trim()
+      if (isMarkdownPath(trimmed)) {
+        results.push(classifyPath(trimmed))
+      }
+    }
+  }
+
+  return results
+}
+
+/**
+ * Remove markdown paths from query before checking action words
+ * This prevents false positives like "/tmp/deploy.md" matching "deploy"
+ */
+function removeMarkdownPaths(text: string): string {
+  return text.replace(/(?:\.?\.?\/)?[^\s]*?\.(?:md|markdown)/gi, "")
+}
+
+/**
+ * Check for strong execution action in query (excluding path parts)
+ */
+function hasStrongExecAction(query: string): boolean {
+  const textWithoutPaths = removeMarkdownPaths(query)
+  return STRONG_EXEC_ACTIONS.some(p => p.test(textWithoutPaths))
+}
+
+/**
+ * Check for weak guide word in query (excluding path parts)
+ */
+function hasWeakGuideWord(query: string): boolean {
+  const textWithoutPaths = removeMarkdownPaths(query)
+  return WEAK_GUIDE_WORDS.some(p => p.test(textWithoutPaths))
+}
+
+/**
+ * Check for execution-related word in query (excluding path parts)
+ */
+function hasExecRelatedWord(query: string): boolean {
+  const textWithoutPaths = removeMarkdownPaths(query)
+  return EXEC_RELATED_WORDS.some(p => p.test(textWithoutPaths))
+}
+
+/**
+ * Calculate execute_document score
+ *
+ * Scoring rules:
+ * 1. MUST have action word (strong action OR weak guide + exec-related) to get any score
+ * 2. Path scores are added on top of action score
+ *
+ * Action scores:
+ * - Strong action (执行/部署/安装/运行): 3 points
+ * - Weak guide (根据/按照) + exec-related (部署/执行/安装): 1 + 2 = 3 points
+ * - Weak guide alone: 1 point (not enough by itself)
+ *
+ * Path scores (only counted if action score > 0):
+ * - Absolute path (.md): +3
+ * - Relative path (.md): +2
+ * - Bare filename (.md): +1
+ *
+ * Content scores (only counted if action score > 0):
+ * - Markdown content: +2
+ *
+ * Threshold: 5 points
+ */
+function calculateExecuteDocumentScore(
+  query: string,
+  context?: Record<string, unknown>
+): number {
+  // Step 1: Calculate action score
+  let actionScore = 0
+
+  if (hasStrongExecAction(query)) {
+    actionScore = SCORE_WEIGHTS.STRONG_ACTION
+  } else if (hasWeakGuideWord(query)) {
+    actionScore = SCORE_WEIGHTS.WEAK_GUIDE
+    if (hasExecRelatedWord(query)) {
+      actionScore += SCORE_WEIGHTS.EXEC_RELATED
+    }
+  }
+
+  // Step 2: If no action score, don't count path/content
+  // This is the key change: path alone should NOT trigger execute_document
+  if (actionScore === 0) {
+    return 0
+  }
+
+  // Step 3: Calculate path/content score (as bonus to action)
+  let bonusScore = 0
+
+  // Path from query
+  const paths = extractMarkdownPaths(query)
+  for (const { type } of paths) {
+    if (type === "absolute") {
+      bonusScore += SCORE_WEIGHTS.ABSOLUTE_PATH
+    } else if (type === "relative") {
+      bonusScore += SCORE_WEIGHTS.RELATIVE_PATH
+    } else {
+      bonusScore += SCORE_WEIGHTS.BARE_FILENAME
+    }
+  }
+
+  // Path from context
+  if (context?.path && typeof context.path === "string") {
+    if (isMarkdownPath(context.path)) {
+      const { type } = classifyPath(context.path)
+      if (type === "absolute") {
+        bonusScore += SCORE_WEIGHTS.ABSOLUTE_PATH
+      } else if (type === "relative") {
+        bonusScore += SCORE_WEIGHTS.RELATIVE_PATH
+      } else {
+        bonusScore += SCORE_WEIGHTS.BARE_FILENAME
+      }
+    }
+  }
+
+  // Markdown content
+  if (context?.content && typeof context.content === "string") {
+    if (looksLikeMarkdown(context.content)) {
+      bonusScore += SCORE_WEIGHTS.MARKDOWN_CONTENT
+    }
+  }
+
+  return actionScore + bonusScore
+}
+
+/**
+ * Layer 1: Score-based detection for execute_document
+ *
+ * Returns true if score meets threshold
+ */
+function shouldTriggerExecuteDocument(
   query: string,
   context?: Record<string, unknown>
 ): boolean {
-  // First check if there's an execution action
-  const hasAction = hasExecutionAction(query)
-
-  // No action word, don't treat as execute_document even with .md path
-  if (!hasAction) {
-    return false
-  }
-
-  // Has action word, now check structural signals
-
-  // 1. context.path with .md/.markdown extension
-  if (context?.path && typeof context.path === "string") {
-    if (isMarkdownPath(context.path)) {
-      return true
-    }
-  }
-
-  // 2. context.content looks like markdown
-  if (context?.content && typeof context.content === "string") {
-    if (looksLikeMarkdown(context.content)) {
-      return true
-    }
-  }
-
-  // 3. Query contains document paths ending with .md/.markdown
-  const docPaths = extractDocumentPaths(query)
-  if (docPaths.length > 0) {
-    return true
-  }
-
-  return false
+  const score = calculateExecuteDocumentScore(query, context)
+  return score >= SCORE_THRESHOLD
 }
+
+// =============================================================================
+// Main export functions
+// =============================================================================
 
 /**
  * Parse intent with context (three-layer recognition)
  *
  * Priority:
- * 1. Strong structural signals + action words (execute_document detection)
+ * 1. Scoring system for execute_document (path + action)
  * 2. Skill triggers from registry (string matching)
  * 3. INTENT_PATTERNS fallback
  * 4. "auto" as default
@@ -282,9 +448,8 @@ export function parseIntentWithContext(
   const intentToSkill = getIntentToSkillMap()
   const queryLower = query.toLowerCase()
 
-  // Layer 1: Strong structural signals + action words for execute_document
-  // This takes highest priority because it's based on explicit signals
-  if (checkDocumentStructuralSignals(query, context)) {
+  // Layer 1: Score-based execute_document detection
+  if (shouldTriggerExecuteDocument(query, context)) {
     return "execute_document"
   }
 
@@ -321,9 +486,6 @@ export function parseIntentWithContext(
 
 /**
  * Parse intent from query only (backward compatible)
- *
- * For use when context is not available.
- * Delegates to parseIntentWithContext with undefined context.
  */
 export function parseIntent(query: string): Intent {
   return parseIntentWithContext(query, undefined)
@@ -345,9 +507,6 @@ export function parseIntentFromKeywords(keywords: string[]): Intent {
 
 /**
  * Get intent description
- *
- * Uses skill.description from registry for skill-backed intents.
- * Falls back to hardcoded descriptions for non-skill intents.
  */
 export function getIntentDescription(intent: Intent): string {
   const skill = getIntentToSkillMap().get(intent)
@@ -375,7 +534,6 @@ export function getIntentDescription(intent: Intent): string {
 
 /**
  * Get skill path for intent
- * Looks up skill by dispatch_intent from registry
  */
 export function getIntentSkillPath(intent: Intent): string | null {
   const skill = getSkillByIntent(intent)
