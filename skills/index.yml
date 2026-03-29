@@ -270,7 +270,8 @@ skills:
         - PACKAGE_TYPE  # driver | container_toolkit | sdk
         - VERSION
       optional:
-        - SOURCE  # moss | local | mirror
+        - SOURCE  # moss | local | mirror (ignored for container_toolkit)
+        - MUSA_SDK_VERSION  # required for driver with moss source
     outputs:
       - status: found | downloaded | missing | failed
       - resolvedPath

@@ -102,6 +102,11 @@ export MOSS_SECRET_KEY="your-secret-key"
 
 *Required if PACKAGE_TYPE is `driver` and SOURCE is `moss`.
 
+**Note on SOURCE**:
+- `driver`: Uses SOURCE parameter (moss/local/mirror)
+- `container_toolkit`: Ignores SOURCE, always downloads from configured HTTP URL
+- `sdk`: Uses SOURCE parameter
+
 ## Privileges Required
 
 - **Sudo**: No
@@ -180,17 +185,18 @@ If package not found locally:
 
 ```bash
 if [ -z "$PACKAGE_PATH" ]; then
-    case "$SOURCE" in
-        moss)
-            # Get MOSS credentials from environment
-            MOSS_AK="${MOSS_ACCESS_KEY:-${MT_MOSS_ACCESS_KEY:-sw-guest-mt-sw}}"
-            MOSS_SK="${MOSS_SECRET_KEY:-${MT_MOSS_SECRET_KEY:-sw-guest123}}"
+    case "$PACKAGE_TYPE" in
+        driver)
+            # Driver requires MOSS (MinIO) download
+            case "$SOURCE" in
+                moss)
+                    # Get MOSS credentials from environment
+                    MOSS_AK="${MOSS_ACCESS_KEY:-${MT_MOSS_ACCESS_KEY:-sw-guest-mt-sw}}"
+                    MOSS_SK="${MOSS_SECRET_KEY:-${MT_MOSS_SECRET_KEY:-sw-guest123}}"
 
-            # Setup MinIO client
-            mc alias set sh-moss https://sh-moss.mthreads.com "$MOSS_AK" "$MOSS_SK"
+                    # Setup MinIO client
+                    mc alias set sh-moss https://sh-moss.mthreads.com "$MOSS_AK" "$MOSS_SK"
 
-            case "$PACKAGE_TYPE" in
-                driver)
                     # Try SDK-specific path first
                     BASE="sh-moss/sw-release/musa/external/${MUSA_SDK_VERSION}/deb"
 
@@ -211,25 +217,49 @@ if [ -z "$PACKAGE_PATH" ]; then
                     fi
                     ;;
 
-                container_toolkit)
-                    # Download container toolkit from configured URL
-                    TOOLKIT_CONFIG="${PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo '.')}/skills/config/env/container_toolkit.yml"
-                    # YAML is a list at root level, filter by version
-                    TOOLKIT_URL=$(yq '.[] | select(.version == "'${VERSION}'") | .url' "$TOOLKIT_CONFIG" | head -n 1)
-                    if [ -n "$TOOLKIT_URL" ]; then
-                        wget -O ./musa_packages/mt-container-toolkit-${VERSION}.zip "$TOOLKIT_URL"
-                        PACKAGE_PATH="./musa_packages/mt-container-toolkit-${VERSION}.zip"
-                    fi
+                mirror)
+                    echo "Mirror download not yet implemented for driver"
+                    ;;
+
+                local)
+                    echo "No local driver package specified"
                     ;;
             esac
             ;;
 
-        mirror)
-            echo "Mirror download not yet implemented"
+        container_toolkit)
+            # Container toolkit uses direct HTTP download (no MOSS needed)
+            # SOURCE parameter is ignored - always downloads from configured URL
+            TOOLKIT_CONFIG="${PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo '.')}/skills/config/env/container_toolkit.yml"
+
+            if [ -f "$TOOLKIT_CONFIG" ]; then
+                # YAML is a list at root level, filter by version
+                TOOLKIT_URL=$(yq '.[] | select(.version == "'${VERSION}'") | .url' "$TOOLKIT_CONFIG" | head -n 1)
+                if [ -n "$TOOLKIT_URL" ]; then
+                    echo "Downloading mt-container-toolkit ${VERSION} from configured URL..."
+                    wget -O ./musa_packages/mt-container-toolkit-${VERSION}.zip "$TOOLKIT_URL"
+                    PACKAGE_PATH="./musa_packages/mt-container-toolkit-${VERSION}.zip"
+                else
+                    echo "Version ${VERSION} not found in container_toolkit.yml"
+                fi
+            else
+                echo "Container toolkit config not found: $TOOLKIT_CONFIG"
+            fi
             ;;
 
-        local)
-            echo "No local package specified"
+        sdk)
+            # SDK download (implementation depends on source)
+            case "$SOURCE" in
+                moss)
+                    echo "SDK download from MOSS not yet implemented"
+                    ;;
+                mirror)
+                    echo "Mirror download not yet implemented for SDK"
+                    ;;
+                local)
+                    echo "No local SDK package specified"
+                    ;;
+            esac
             ;;
     esac
 fi
