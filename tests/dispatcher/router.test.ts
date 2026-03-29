@@ -143,7 +143,7 @@ describe("routeToHandler", () => {
 
       const result = await routeToHandler(ctx)
 
-      expect(result.type).toBe("direct")
+      expect(result.type).toBe("document")
       expect(result.target).toBe("document_executor")
     })
   })

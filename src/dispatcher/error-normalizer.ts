@@ -18,6 +18,10 @@ export type DispatchErrorCode =
   | "OPERATION_NOT_RESUMABLE" // Resume 状态不合法
   | "RESUME_PREREQUISITE_NOT_MET"  // Resume 前提不满足
   | "RESUME_FAILED"          // Resume 操作生命周期失败
+  | "DOCUMENT_SOURCE_MISSING"  // 文档源缺失
+  | "PLAN_INVALID"            // 执行计划无效
+  | "SAFETY_BLOCKED"          // 安全检查阻止
+  | "DOCUMENT_LOAD_ERROR"     // 文档加载错误
 
 export interface DispatchError {
   code: DispatchErrorCode

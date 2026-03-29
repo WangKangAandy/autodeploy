@@ -91,7 +91,7 @@ function buildSkillMeta(skillId: string): { id: string; kind: "atomic" | "meta";
 }
 
 export interface RouteResult {
-  type: "skill" | "tool" | "direct" | "orchestration" | "error"
+  type: "skill" | "tool" | "direct" | "orchestration" | "error" | "document"
   /**
    * Logical target identifier only.
    * - For type="skill": this MUST be the skill ID, not a file path.
@@ -465,7 +465,7 @@ async function routeExecuteDocument(context: Record<string, unknown>, action: st
   }
 
   return {
-    type: "direct",
+    type: "document",
     target: "document_executor",
     params: context,
     message: `Execute deployment from document.

@@ -65,7 +65,7 @@ const plugin = {
     },
   },
 
-  register(api) {
+  async register(api) {
     const log = (msg) => api.logger.info?.(`[musa] ${formatTracePrefix()}${msg}`);
     const warn = (msg) => api.logger.warn?.(`[musa] ${formatTracePrefix()}${msg}`);
 
@@ -123,9 +123,7 @@ const plugin = {
       // Initialize state manager
       const workspacePath = api.getWorkspacePath?.() || process.cwd();
       stateManager = new StateManager(workspacePath);
-      stateManager.initialize().catch(err => {
-        api.logger.error?.(`[musa] Failed to initialize state manager: ${err}`);
-      });
+      await stateManager.initialize();
 
       registerHooks = registerHooksFn;
       registerDispatcherTool = registerDispatcher;

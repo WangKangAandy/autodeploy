@@ -20,7 +20,7 @@ function registerMusaTools(api, stateManager = null) {
   registerMusaGetModeTool(api);
 
   // Execution tools
-  registerMusaExecTool(api);
+  registerMusaExecTool(api, stateManager);
   registerMusaDockerTool(api);
   registerMusaSyncTool(api);
 }

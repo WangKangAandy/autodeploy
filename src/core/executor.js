@@ -154,7 +154,7 @@ function getRemoteConfig() {
  * @returns {boolean} True if remote mode is ready
  */
 function isRemoteReady() {
-  return (
+  return !!(
     cachedMode === "remote" &&
     cachedRemoteConfig &&
     cachedRemoteConfig.host &&

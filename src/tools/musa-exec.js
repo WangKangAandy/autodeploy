@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  init,
   setMode,
   getMode,
   getRemoteConfig,
@@ -138,8 +139,17 @@ This tool must be called before using musa_exec for remote deployment.`,
 /**
  * Register musa_exec tool
  * Executes a shell command for MUSA deployment
+ *
+ * @param {Object} api - OpenClaw plugin API
+ * @param {Object} sm - StateManager instance for persistence
  */
-function registerMusaExecTool(api) {
+function registerMusaExecTool(api, sm = null) {
+  // Initialize executor with StateManager if provided
+  // This ensures executor has stateManager reference even if hooks.ts fails to load
+  if (sm) {
+    init(sm);
+  }
+
   api.registerTool({
     name: "musa_exec",
     description: `Execute a shell command for MUSA deployment.

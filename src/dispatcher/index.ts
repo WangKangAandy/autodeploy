@@ -29,6 +29,16 @@ import {
 import { createLogger } from "../shared/logger.js"
 import { getLarkTicket, type LarkTicket } from "../shared/lark-ticket.js"
 import { getIntentList, getIntentToSkillMap } from "./skill-registry.js"
+import {
+  documentLoader,
+  parseDocument,
+  generatePlan,
+  validatePlan,
+  validateSafety,
+  generatePlanReview,
+  type ParsedDocument,
+  type ExecutionPlan,
+} from "../document/index.js"
 
 /**
  * Build intent descriptions from skill registry
@@ -586,6 +596,17 @@ export async function dispatch(
       stateManager,
     })
 
+    // 6.5 Handle document execution route
+    if (route.type === "document") {
+      const documentResult = await handleDocumentExecution(route, resolvedIntent, operationId, stateManager, context)
+      if (documentResult.error) {
+        finishSpan(span, "error", { code: "DOCUMENT_ERROR", message: documentResult.error.originalError })
+      } else {
+        finishSpan(span, "ok")
+      }
+      return documentResult
+    }
+
     // 7. Return route result (actual execution is delegated to skills/tools)
     if (route.type !== "error") {
       finishSpan(span, "ok")
@@ -640,6 +661,204 @@ export async function dispatch(
       guidance: error.guidance,
     }
   }
+}
+
+/**
+ * Handle document execution route
+ *
+ * Executes the document-driven deployment workflow:
+ * 1. Load document (local file or pasted content)
+ * 2. Parse document into phases and steps
+ * 3. Generate execution plan
+ * 4. Safety validation
+ * 5. Return plan for user confirmation
+ */
+async function handleDocumentExecution(
+  route: RouteResult,
+  intent: Intent,
+  operationId: string | null,
+  stateManager: StateManager,
+  context: Record<string, unknown>
+): Promise<DispatchResult> {
+  const params = route.params
+  const path = params.path as string | undefined
+  const content = params.content as string | undefined
+
+  try {
+    // Step 1: Load document
+    let rawDocument
+    if (path) {
+      rawDocument = await documentLoader.loadFromLocal(path)
+    } else if (content) {
+      rawDocument = await documentLoader.loadFromPasted(content)
+    } else {
+      return {
+        success: false,
+        intent,
+        action: "start",
+        route,
+        precheck: null,
+        permission: null,
+        operationId,
+        jobId: null,
+        error: {
+          code: "DOCUMENT_SOURCE_MISSING",
+          intent,
+          step: "load",
+          originalError: "Document source not provided. Use path or content parameter.",
+          guidance: "Provide document source: path for local file or content for pasted text.",
+          recoverable: true,
+        },
+        guidance: "Provide document source: path for local file or content for pasted text.",
+      }
+    }
+
+    // Step 2: Parse document
+    const parsedDocument = parseDocument(rawDocument)
+
+    // Step 3: Generate execution plan
+    const plan = generatePlan(parsedDocument)
+    const validation = validatePlan(plan)
+
+    if (!validation.valid) {
+      return {
+        success: false,
+        intent,
+        action: "start",
+        route,
+        precheck: null,
+        permission: null,
+        operationId,
+        jobId: null,
+        error: {
+          code: "PLAN_INVALID",
+          intent,
+          step: "plan_generation",
+          originalError: validation.issues.join("; "),
+          guidance: "Fix document format issues: " + validation.issues.join("; "),
+          recoverable: true,
+        },
+        guidance: "Fix document format issues: " + validation.issues.join("; "),
+      }
+    }
+
+    // Step 4: Safety validation (use ExecutionPlan)
+    const safetyResult = validateSafety(plan)
+    if (safetyResult.blockedSteps.length > 0) {
+      return {
+        success: false,
+        intent,
+        action: "start",
+        route,
+        precheck: null,
+        permission: null,
+        operationId,
+        jobId: null,
+        error: {
+          code: "SAFETY_BLOCKED",
+          intent,
+          step: "safety_validation",
+          originalError: `Blocked steps: ${safetyResult.blockedSteps.map(s => s.description).join(", ")}`,
+          guidance: "Document contains blocked commands. Review and remove dangerous operations.",
+          recoverable: true,
+        },
+        guidance: "Document contains blocked commands. Review and remove dangerous operations.",
+      }
+    }
+
+    // Step 5: Generate plan review for user confirmation
+    const planReview = generatePlanReview(
+      plan,
+      parsedDocument.title || "Untitled",
+      rawDocument.source,
+      safetyResult
+    )
+
+    // Return with plan review awaiting confirmation
+    return {
+      success: true,
+      intent,
+      action: "start",
+      route,
+      precheck: null,
+      permission: null,
+      operationId,
+      jobId: null,
+      error: null,
+      guidance: formatDocumentPlanReview(planReview, plan, parsedDocument),
+    }
+  } catch (err) {
+    return {
+      success: false,
+      intent,
+      action: "start",
+      route,
+      precheck: null,
+      permission: null,
+      operationId,
+      jobId: null,
+      error: {
+        code: "DOCUMENT_LOAD_ERROR",
+        intent,
+        step: "load",
+        originalError: err instanceof Error ? err.message : String(err),
+        guidance: "Failed to load document. Check path or content.",
+        recoverable: true,
+      },
+      guidance: "Failed to load document. Check path or content.",
+    }
+  }
+}
+
+/**
+ * Format document plan review for display
+ */
+function formatDocumentPlanReview(
+  planReview: ReturnType<typeof generatePlanReview>,
+  plan: ExecutionPlan,
+  document: ParsedDocument
+): string {
+  const lines: string[] = []
+  lines.push("## Document Execution Plan Review")
+  lines.push("")
+  lines.push(`**Document**: ${document.title || "Untitled"}`)
+  lines.push(`**Phases**: ${plan.phases.length}`)
+  lines.push(`**Total Steps**: ${plan.phases.reduce((sum, p) => sum + p.steps.length, 0)}`)
+  lines.push("")
+
+  if (planReview.requiresConfirmation) {
+    lines.push("**Warning**: " + (planReview.reason || "Contains high-risk steps"))
+    lines.push("")
+  }
+
+  // List phases and steps
+  for (const phase of plan.phases) {
+    lines.push(`### Phase: ${phase.name}`)
+    for (const step of phase.steps) {
+      const riskIcon = step.executionStep.riskLevel === "destructive" ? "[!] "
+        : step.executionStep.riskLevel === "safe_write" ? "[~] "
+        : "[OK] "
+      lines.push(`  ${riskIcon}${step.executionStep.description}`)
+    }
+    lines.push("")
+  }
+
+  if (plan.unparsedSections.length > 0) {
+    lines.push("**Unparsed Sections**:")
+    for (const section of plan.unparsedSections) {
+      lines.push(`- ${section.substring(0, 100)}${section.length > 100 ? "..." : ""}`)
+    }
+    lines.push("")
+  }
+
+  lines.push("**Instructions**:")
+  lines.push("1. Read each phase and step above")
+  lines.push("2. Execute each code block in the order shown")
+  lines.push("3. Validate results at validation endpoints")
+  lines.push("")
+  lines.push("Reply with **confirm** to proceed, or **cancel** to abort.")
+
+  return lines.join("\n")
 }
 
 /**
@@ -709,6 +928,19 @@ function buildGuidance(route: RouteResult, intent: Intent, action: string): stri
       lines.push("### Direct Execution")
       lines.push("")
       lines.push(route.message)
+    } else if (route.type === "document") {
+      lines.push("### Document Execution")
+      lines.push("")
+      lines.push(route.message)
+      lines.push("")
+      lines.push("**Document Execution Flow**:")
+      lines.push("1. Read the document file or content from the path")
+      lines.push("2. Parse the document to identify phases and steps")
+      lines.push("3. Execute each code block sequentially")
+      lines.push("4. Validate results at each validation endpoint")
+      lines.push("")
+      lines.push("**Parameters**:")
+      lines.push(JSON.stringify(route.params, null, 2))
     }
   }
 
