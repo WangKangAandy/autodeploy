@@ -1,6 +1,12 @@
 /**
  * AGENTS.md Merge Utilities
  *
+ * @deprecated Use inject-manager.js instead.
+ * This module is kept for backwards compatibility and re-exports inject-manager functions.
+ *
+ * New code should use:
+ *   const { ensureAllInjected, checkInjected } = require("./inject-manager");
+ *
  * Handles block merge of AGENTS.autodeploy.md into workspace AGENTS.md.
  * Supports install, upgrade, and idempotent scenarios.
  *
@@ -358,14 +364,41 @@ function unmergeAgentsMd(workspacePath) {
 // Exports
 // ============================================================================
 
+// Re-export inject-manager for backwards compatibility
+const injectManager = require("./inject-manager");
+
+/**
+ * @deprecated Use ensureAllInjected from inject-manager instead
+ * Wraps ensureAllInjected for legacy callers expecting single result object
+ */
+function ensureAgentsMergedLegacy(workspacePath, pluginDir) {
+  const injectDir = path.join(pluginDir, "inject");
+  const results = injectManager.ensureAllInjected(workspacePath, injectDir);
+  // Return agents result for backwards compatibility
+  return results.agents || { status: "failed", reason: "agents injection missing" };
+}
+
+/**
+ * @deprecated Use checkInjected from inject-manager instead
+ */
+function checkStaticRulesLegacy(workspacePath) {
+  const status = injectManager.checkInjected(workspacePath);
+  return status.agents || false;
+}
+
 module.exports = {
   BLOCK_MARKERS,
-  ensureAgentsMerged,
+  ensureAgentsMerged: ensureAgentsMergedLegacy,
   mergeAgentsMd,
   unmergeAgentsMd,
   checkBlockStatus,
-  checkStaticRules,
+  checkStaticRules: checkStaticRulesLegacy,
   normalizeContent,
   atomicWrite,
   withLockSync,
+  // New inject-manager exports
+  ensureAllInjected: injectManager.ensureAllInjected,
+  uninjectAll: injectManager.uninjectAll,
+  checkInjected: injectManager.checkInjected,
+  INJECT_SOURCES: injectManager.INJECT_SOURCES,
 };

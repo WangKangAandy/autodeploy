@@ -108,19 +108,39 @@ mappings:
 
   - name: static-rules-docs
     code:
-      - "AGENTS.autodeploy.md"
+      - "inject/AGENTS.autodeploy.md"
+      - "inject/IDENTITY.autodeploy.md"
     docs:
-      - "CLAUDE.md#Documentation-Update-Rules"
-      - "AGENTS.md#MUSA-Platform-Rules"
-    check: "核心规则变更时更新摘要和链接"
-    review_hint: "AGENTS.autodeploy.md 是主定义，其他文档只保留摘要和链接"
+      - "CLAUDE.md#Document-Injection-System"
+      - "inject/README.md"
+    check: "注入源内容变更时更新说明文档"
+    review_hint: "inject/ 目录是注入源定义，修改后检查 inject/README.md 和 CLAUDE.md"
     owner: "platform-team"
     severity: "low"
     examples:
       must_update:
-        - "新增或删除 Intent"
-        - "修改核心规则"
-        - "修改决策优先级"
+        - "新增注入源文件"
+        - "修改 AGENTS 或 IDENTITY 内容"
+        - "修改注入标记格式"
       usually_no_update:
         - "修改示例代码"
         - "调整格式"
+
+  - name: inject-manager-docs
+    code:
+      - "src/utils/inject-manager.js"
+    docs:
+      - "CLAUDE.md#Document-Injection-System"
+      - "inject/README.md"
+    check: "注入机制变化时更新说明文档"
+    review_hint: "涉及 INJECT_SOURCES 结构、注入流程、幂等合并逻辑变化时检查"
+    owner: "platform-team"
+    severity: "medium"
+    examples:
+      must_update:
+        - "新增或删除 INJECT_SOURCES 条目"
+        - "修改注入流程"
+        - "修改幂等合并逻辑"
+      usually_no_update:
+        - "重构内部辅助函数"
+        - "修改日志语句"

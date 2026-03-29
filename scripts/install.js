@@ -3,7 +3,7 @@
  * OpenClaw Plugin Installation Script
  *
  * CLI entry point for install/uninstall actions.
- * Delegates merge logic to src/utils/agents-merge.js.
+ * Delegates merge logic to src/utils/inject-manager.js.
  *
  * Usage:
  *   node scripts/install.js install [workspace-path]
@@ -13,10 +13,10 @@
 const fs = require("fs");
 const path = require("path");
 const {
-  mergeAgentsMd,
-  unmergeAgentsMd,
-  BLOCK_MARKERS,
-} = require("../src/utils/agents-merge");
+  ensureAllInjected,
+  uninjectAll,
+  INJECT_SOURCES,
+} = require("../src/utils/inject-manager");
 
 /**
  * Initialize state directory
@@ -82,26 +82,32 @@ function cleanupStateDir(workspacePath, keepState = true) {
  */
 function install(options) {
   const { workspacePath, pluginDir, action = "install", keepState = true } = options;
+  const injectDir = path.join(pluginDir, "inject");
 
   console.log(`[autodeploy] ${action} starting...`);
   console.log(`[autodeploy] Plugin dir: ${pluginDir}`);
+  console.log(`[autodeploy] Inject dir: ${injectDir}`);
   console.log(`[autodeploy] Workspace: ${workspacePath}`);
 
   switch (action) {
     case "install":
     case "upgrade":
-      if (mergeAgentsMd(workspacePath, pluginDir)) {
-        console.log("[autodeploy] AGENTS.md merged successfully");
-      } else {
-        console.error("[autodeploy] AGENTS.md merge failed");
+      const results = ensureAllInjected(workspacePath, injectDir);
+      for (const [source, result] of Object.entries(results)) {
+        if (result.status === "failed") {
+          console.error(`[autodeploy] Inject ${source} failed: ${result.reason}`);
+        } else {
+          console.log(`[autodeploy] Inject ${source}: ${result.status}`);
+        }
       }
       initializeStateDir(workspacePath);
       console.log("[autodeploy] Installation complete");
       break;
 
     case "uninstall":
-      if (unmergeAgentsMd(workspacePath)) {
-        console.log("[autodeploy] AGENTS.md unmerged successfully");
+      const uninjectResults = uninjectAll(workspacePath);
+      for (const [source, result] of Object.entries(uninjectResults)) {
+        console.log(`[autodeploy] Uninject ${source}: ${result.status}`);
       }
       cleanupStateDir(workspacePath, keepState);
       console.log("[autodeploy] Uninstallation complete");
@@ -132,9 +138,9 @@ if (require.main === module) {
 
 module.exports = {
   install,
-  mergeAgentsMd,
-  unmergeAgentsMd,
+  ensureAllInjected,
+  uninjectAll,
   initializeStateDir,
   cleanupStateDir,
-  BLOCK_MARKERS,
+  INJECT_SOURCES,
 };

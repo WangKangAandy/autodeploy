@@ -2,7 +2,7 @@
 
 const path = require("path");
 const { registerMusaTools } = require("./src/tools");
-const { ensureAgentsMerged, checkStaticRules } = require("./src/utils/agents-merge");
+const { ensureAllInjected, checkInjected } = require("./src/utils/inject-manager");
 
 // Note: TypeScript modules (adapter, dispatcher, state-manager) need to be compiled
 // before use. Run: npm run build
@@ -78,28 +78,32 @@ const plugin = {
     log(`OpenClaw workspace: ${openclawWorkspace}`);
 
     // =========================================================================
-    // 1. Auto-merge AGENTS.autodeploy.md (self-bootstrapping)
+    // 1. Auto-inject all sources (AGENTS, IDENTITY, etc.)
     // =========================================================================
-    const AUTO_MERGE_ENABLED = process.env.MUSA_AUTO_MERGE_AGENTS !== "false";
+    const AUTO_INJECT_ENABLED = process.env.MUSA_AUTO_INJECT !== "false";
+    const injectDir = path.join(pluginDir, "inject");
 
-    if (AUTO_MERGE_ENABLED) {
-      // ensureAgentsMerged() never throws, returns result object
-      const result = ensureAgentsMerged(openclawWorkspace, pluginDir);
-      log(`AGENTS autodeploy: ${result.status}`);
-
-      if (result.status === "failed") {
-        warn(`AGENTS merge failed: ${result.reason}`);
+    if (AUTO_INJECT_ENABLED) {
+      // ensureAllInjected() never throws, returns results object
+      const results = ensureAllInjected(openclawWorkspace, injectDir);
+      for (const [source, result] of Object.entries(results)) {
+        log(`Inject ${source}: ${result.status}`);
+        if (result.status === "failed") {
+          warn(`Inject ${source} failed: ${result.reason}`);
+        }
       }
     } else {
-      log("AGENTS auto-merge disabled by MUSA_AUTO_MERGE_AGENTS=false");
+      log("Auto-inject disabled by MUSA_AUTO_INJECT=false");
     }
 
     // =========================================================================
     // 2. Track platform capabilities
     // =========================================================================
     // Capability truth comes from target file state, not process return value
+    const injectStatus = checkInjected(openclawWorkspace);
     const capabilities = {
-      staticRules: checkStaticRules(openclawWorkspace),
+      staticRules: injectStatus.agents || false,
+      identity: injectStatus.identity || false,
       dynamicContext: false,
       dispatcher: false,
       stateManager: false,
@@ -180,6 +184,7 @@ const plugin = {
     // Output capability check
     log("=== Platform Capabilities ===");
     log(`  Static Rules (AGENTS.md): ${capabilities.staticRules ? "✓" : "✗"}`);
+    log(`  Identity (IDENTITY.md): ${capabilities.identity ? "✓" : "✗"}`);
     log(`  Dynamic Context (hook): ${capabilities.dynamicContext ? "✓" : "✗"}`);
     log(`  Dispatcher (manual): ${capabilities.dispatcher ? "✓" : "✗"}`);
     log(`  State Manager: ${capabilities.stateManager ? "✓" : "✗"}`);

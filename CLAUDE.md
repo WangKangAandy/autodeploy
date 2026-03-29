@@ -58,12 +58,44 @@ This is a **platform runtime layer** with four core capabilities:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    四大核心能力                                  │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. Static Rules    — AGENTS.autodeploy.md 自动合并注入         │
+│  1. Static Rules    — inject/ 目录声明式注入 (AGENTS, IDENTITY) │
 │  2. Dynamic Context — before_prompt_build hook 动态上下文注入    │
 │  3. Dispatcher      — musa_dispatch 统一意图路由                 │
 │  4. State Manager   — 部署状态持久化与恢复                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Document Injection System
+
+The plugin uses a **declarative injection system** to merge static content into OpenClaw workspace.
+
+**Source Directory:** `inject/`
+
+| Source | Target | Markers | Purpose |
+|--------|--------|---------|---------|
+| `AGENTS.autodeploy.md` | `AGENTS.md` | `<!-- AUTODEPLOY:BEGIN/END -->` | Platform rules |
+| `IDENTITY.autodeploy.md` | `IDENTITY.md` | `<!-- AUTODEPLOY:IDENTITY:BEGIN/END -->` | Agent identity |
+
+**Injection Mechanism:** `src/utils/inject-manager.js`
+
+- Declarative source list (`INJECT_SOURCES` array)
+- Idempotent merge (safe to call multiple times)
+- Atomic write with temp file + rename
+- Concurrent-safe with file lock
+
+**Adding New Sources:** Add entry to `INJECT_SOURCES` in `inject-manager.js`:
+
+```javascript
+{
+  key: "soul",
+  sourceFile: "SOUL.autodeploy.md",
+  targetFile: "SOUL.md",
+  markers: { begin: "<!-- AUTODEPLOY:SOUL:BEGIN -->", end: "<!-- AUTODEPLOY:SOUL:END -->" },
+  required: false,
+}
+```
+
+**Manual Refresh:** `node scripts/install.js install ~/.openclaw/workspace`
 
 The repository has two parallel tool implementations:
 
@@ -118,12 +150,14 @@ State files stored in `autodeploy/` directory: `hosts.json`, `operations.json`, 
 | Path | Purpose |
 |------|---------|
 | `index.js` | OpenClaw plugin entry point |
+| `inject/` | Declarative injection sources (AGENTS, IDENTITY) |
 | `src/core/` | Core executors and StateManager |
 | `src/dispatcher/` | Unified dispatch system (intent parser, router, orchestrator) |
 | `src/document/` | Document-driven execution engine (loader, parser, executor) |
 | `src/adapter/` | OpenClaw hooks and dynamic context builder |
 | `src/shared/` | Trace framework and structured logging |
 | `src/tools/` | OpenClaw tool definitions (musa_*) |
+| `src/utils/` | Utility modules (inject-manager, agents-merge) |
 | `agent-tools/src/` | MCP server implementation |
 | `skills/` | Executable automation skills (meta and atomic) |
 | `references/` | Non-executable knowledge resources |
