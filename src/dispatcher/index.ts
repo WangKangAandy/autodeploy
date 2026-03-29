@@ -183,17 +183,43 @@ export interface DispatchResult {
 }
 
 /**
+ * Non-skill intents that are handled directly by dispatcher/router
+ * These intents have no corresponding skill in skills/index.yml
+ */
+const NON_SKILL_INTENTS = [
+  "gpu_status",     // Check GPU status with mthreads-gmi
+  "validate",       // Validate MUSA environment
+  "sync",           // Sync files between local and remote
+  "run_container",  // Run Docker container with GPU access
+  "execute_document", // Execute deployment from document
+]
+
+/**
+ * Non-skill intent descriptions
+ */
+const NON_SKILL_INTENT_DESCRIPTIONS: Record<string, string> = {
+  gpu_status: "Check GPU status with mthreads-gmi",
+  validate: "Validate MUSA environment (toolkit, PyTorch MUSA)",
+  sync: "Sync files between local and remote hosts",
+  run_container: "Run a Docker container with GPU access",
+  execute_document: "Execute deployment plan from document (parse, plan, execute)",
+}
+
+/**
  * Register musa_dispatch tool
  */
 export function registerDispatcherTool(api: any, stateManager: StateManager): void {
   // Load registry and get intents from single source of truth (skills/index.yml)
   const skillIntents = getIntentList()
 
-  // Add 'auto' for auto-detection mode
-  const intentEnum = [...skillIntents, "auto"]
+  // Combine skill intents + non-skill intents + auto
+  const intentEnum = [...skillIntents, ...NON_SKILL_INTENTS, "auto"]
 
-  // Build intent descriptions dynamically from skill registry
-  const intentDescriptions = buildIntentDescriptions(skillIntents)
+  // Build intent descriptions: skill intents from registry + non-skill intents hardcoded
+  const skillDescriptions = buildIntentDescriptions(skillIntents)
+  const nonSkillDescriptions = NON_SKILL_INTENTS
+    .map(intent => `- ${intent}: ${NON_SKILL_INTENT_DESCRIPTIONS[intent]}`)
+    .join("\n")
 
   api.registerTool({
     name: "musa_dispatch",
@@ -204,7 +230,8 @@ Handles pre-checks, permission gating, routing to skills/tools, error handling, 
 Use this as the primary entry point for all MUSA-related operations.
 
 **Intents:**
-${intentDescriptions}
+${skillDescriptions}
+${nonSkillDescriptions}
 - auto: Auto-detect intent from query`,
 
     parameters: {
