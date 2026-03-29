@@ -7,6 +7,18 @@
 
 import * as fs from "fs"
 import * as path from "path"
+import { parse as parseYaml } from "yaml"
+import type { Intent } from "../core/state-manager.js"
+
+/**
+ * Valid intents defined in state-manager.ts
+ * Used for runtime validation of dispatch_intent values
+ */
+const VALID_INTENTS: Intent[] = [
+  "deploy_env", "update_driver", "gpu_status", "run_container",
+  "validate", "sync", "execute_document", "prepare_model",
+  "prepare_dataset", "prepare_package", "manage_images", "prepare_repo", "auto"
+]
 
 /**
  * Skill metadata from index.yml
@@ -32,10 +44,31 @@ export interface SkillMeta {
 }
 
 /**
- * Parsed index.yml structure
+ * Raw YAML structure (snake_case fields)
  */
+interface RawSkillYaml {
+  id: string
+  name: string
+  path: string
+  description: string
+  category: "env" | "assets" | "workload" | "benchmark" | "migration"
+  kind: "atomic" | "meta"
+  exposure: "user" | "internal"
+  execution_mode?: string
+  dispatch_intent?: string
+  dispatch_entry?: string
+  risk_level: "safe" | "destructive" | "idempotent"
+  triggers?: string[]
+  inputs?: {
+    required?: string[]
+    optional?: string[]
+  }
+  outputs?: string[]
+  depends_on?: string[]
+}
+
 interface IndexYaml {
-  skills?: SkillMeta[]
+  skills?: RawSkillYaml[]
 }
 
 /**
@@ -75,7 +108,34 @@ function getIndexPath(): string {
 }
 
 /**
+ * Convert raw YAML skill (snake_case) to SkillMeta (camelCase)
+ */
+function normalizeSkill(raw: RawSkillYaml): SkillMeta {
+  return {
+    id: raw.id,
+    name: raw.name,
+    path: raw.path,
+    description: raw.description,
+    category: raw.category,
+    kind: raw.kind,
+    exposure: raw.exposure,
+    dispatchIntent: raw.dispatch_intent,
+    dispatchEntry: raw.dispatch_entry,
+    riskLevel: raw.risk_level,
+    triggers: raw.triggers,
+    inputs: raw.inputs,
+    outputs: raw.outputs,
+    dependsOn: raw.depends_on,
+  }
+}
+
+/**
  * Load skill registry from index.yml
+ *
+ * Uses standard yaml library for robust parsing.
+ * Performs validation:
+ * - Detects duplicate dispatch_intent (throws error)
+ * - Validates dispatch_intent against Intent type (logs warning)
  */
 export function loadRegistry(): void {
   if (registry.loaded) {
@@ -85,16 +145,34 @@ export function loadRegistry(): void {
   try {
     const indexPath = getIndexPath()
     const content = fs.readFileSync(indexPath, "utf-8")
-    // Simple YAML parsing for index.yml structure
-    // We only need to extract skill entries, so a minimal parser works
-    const data = parseSimpleYaml(content) as IndexYaml
+
+    // Use standard YAML parser
+    const data = parseYaml(content) as IndexYaml
 
     if (data.skills) {
-      for (const skill of data.skills) {
+      for (const rawSkill of data.skills) {
+        const skill = normalizeSkill(rawSkill)
         registry.skills.set(skill.id, skill)
 
-        // Map dispatch_intent to skill id
+        // Map dispatch_intent to skill id with conflict detection
         if (skill.dispatchIntent) {
+          // 1. Validate against Intent type
+          if (!VALID_INTENTS.includes(skill.dispatchIntent as Intent)) {
+            console.warn(
+              `[skill-registry] Unknown dispatch_intent "${skill.dispatchIntent}" in skill "${skill.id}". ` +
+              `Valid intents: ${VALID_INTENTS.join(", ")}`
+            )
+          }
+
+          // 2. Detect duplicate dispatch_intent
+          if (registry.intentToSkill.has(skill.dispatchIntent)) {
+            const existingSkillId = registry.intentToSkill.get(skill.dispatchIntent)
+            throw new Error(
+              `Duplicate dispatch_intent "${skill.dispatchIntent}" in skills "${existingSkillId}" and "${skill.id}". ` +
+              `Each intent must map to exactly one skill.`
+            )
+          }
+
           registry.intentToSkill.set(skill.dispatchIntent, skill.id)
         }
       }
@@ -106,89 +184,6 @@ export function loadRegistry(): void {
     // This allows the system to work with hardcoded fallbacks
     console.warn("Failed to load skill registry:", err)
   }
-}
-
-/**
- * Simple YAML parser for index.yml
- * Only handles the subset of YAML we need
- */
-function parseSimpleYaml(content: string): IndexYaml {
-  const result: IndexYaml = { skills: [] }
-  const lines = content.split("\n")
-
-  let currentSkill: Partial<SkillMeta> | null = null
-  let inSkillsArray = false
-  let currentIndent = 0
-
-  for (const line of lines) {
-    // Skip comments and empty lines
-    if (line.trim().startsWith("#") || line.trim() === "") continue
-
-    // Check for skills: array start
-    if (line.trim() === "skills:") {
-      inSkillsArray = true
-      continue
-    }
-
-    // Stop parsing skills when we hit references: or configs:
-    if (line.trim() === "references:" || line.trim() === "configs:") {
-      inSkillsArray = false
-      // Save last skill before exiting skills section
-      if (currentSkill && currentSkill.id) {
-        result.skills!.push(currentSkill as SkillMeta)
-        currentSkill = null
-      }
-      continue
-    }
-
-    if (!inSkillsArray) continue
-
-    // Check for new skill entry (starts with "- id:")
-    if (line.match(/^\s*-\s+id:\s*(.+)$/)) {
-      // Save previous skill
-      if (currentSkill && currentSkill.id) {
-        result.skills!.push(currentSkill as SkillMeta)
-      }
-      currentSkill = { id: line.match(/^\s*-\s+id:\s*(.+)$/)?.[1]?.trim() }
-      currentIndent = line.search(/\S/)
-      continue
-    }
-
-    // Parse skill properties
-    if (currentSkill) {
-      const match = line.match(/^(\s*)(\w+):\s*(.*)$/)
-      if (match) {
-        const [, indent, key, value] = match
-        // Skip if this line is not a property of current skill (less indent than skill entry)
-        if (indent.length <= currentIndent) continue
-
-        if (key && value !== undefined) {
-          // Convert snake_case to camelCase for known fields
-          const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-
-          // Handle different value types
-          if (value.startsWith("[")) {
-            // Array value (simplified)
-            (currentSkill as Record<string, unknown>)[camelKey] = value
-              .replace(/^\[|\]$/g, "")
-              .split(",")
-              .map(s => s.trim().replace(/^['"]|['"]$/g, ""))
-          } else if (value === "true" || value === "false") {
-            (currentSkill as Record<string, unknown>)[camelKey] = value === "true"
-          } else {
-            (currentSkill as Record<string, unknown>)[camelKey] = value.replace(/^['"]|['"]$/g, "")
-          }
-        }
-      }
-    }
-  }
-
-  // Save last skill (if not already saved)
-  if (currentSkill && currentSkill.id) {
-    result.skills!.push(currentSkill as SkillMeta)
-  }
-
-  return result
 }
 
 /**
@@ -282,6 +277,45 @@ export function getSkillsByKind(kind: "atomic" | "meta"): SkillMeta[] {
   for (const skill of registry.skills.values()) {
     if (skill.kind === kind) {
       result.push(skill)
+    }
+  }
+  return result
+}
+
+/**
+ * Get all dispatch intents from registered skills
+ *
+ * Single source of truth for intent enum.
+ * New skills with dispatch_intent in index.yml are automatically included.
+ *
+ * Returns deduplicated and sorted list.
+ */
+export function getIntentList(): string[] {
+  loadRegistry()
+  const intents = new Set<string>()
+
+  // Collect all dispatch_intent from skills (Set handles deduplication)
+  for (const skill of registry.skills.values()) {
+    if (skill.dispatchIntent) {
+      intents.add(skill.dispatchIntent)
+    }
+  }
+
+  // Return sorted array for stable ordering
+  return Array.from(intents).sort()
+}
+
+/**
+ * Get all dispatch intents with their skill metadata
+ *
+ * Returns intent-skill mapping for reference.
+ */
+export function getIntentToSkillMap(): Map<string, SkillMeta> {
+  loadRegistry()
+  const result = new Map<string, SkillMeta>()
+  for (const skill of registry.skills.values()) {
+    if (skill.dispatchIntent) {
+      result.set(skill.dispatchIntent, skill)
     }
   }
   return result

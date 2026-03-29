@@ -88,12 +88,8 @@ describe("parseIntent", () => {
     expect(parseIntent("下载 MUSA 包")).toBe("prepare_package")
   })
 
-  it("should parse manage_images intent", () => {
-    expect(parseIntent("拉取镜像")).toBe("manage_images")
-    expect(parseIntent("推送镜像")).toBe("manage_images")
-    expect(parseIntent("docker pull")).toBe("manage_images")
-    expect(parseIntent("镜像管理")).toBe("manage_images")
-  })
+  // NOTE: manage_images is NOT a dispatch_intent - manage_container_images skill has no dispatch_intent
+  // It's accessed via direct tool routing, not through dispatcher
 
   it("should parse prepare_repo intent", () => {
     expect(parseIntent("克隆仓库")).toBe("prepare_repo")
@@ -110,23 +106,24 @@ describe("parseIntent", () => {
 })
 
 describe("getIntentDescription", () => {
-  it("should return description for all intents", () => {
-    expect(getIntentDescription("deploy_env")).toContain("Deploy complete MUSA")
-    expect(getIntentDescription("update_driver")).toContain("Update or reinstall")
+  it("should return description for skill-backed intents (from skill registry)", () => {
+    // Descriptions now come from skills/index.yml
+    expect(getIntentDescription("deploy_env")).toContain("MUSA environment")
+    expect(getIntentDescription("update_driver")).toContain("driver")
+    expect(getIntentDescription("prepare_model")).toContain("model")
+    expect(getIntentDescription("prepare_dataset")).toContain("dataset")
+    expect(getIntentDescription("prepare_package")).toContain("package")
+    expect(getIntentDescription("prepare_repo")).toContain("repository")
+  })
+
+  it("should return description for non-skill intents (fallback)", () => {
+    // These are hardcoded fallbacks for intents without skills
     expect(getIntentDescription("gpu_status")).toContain("Check GPU status")
     expect(getIntentDescription("run_container")).toContain("Run a Docker container")
     expect(getIntentDescription("validate")).toContain("Validate MUSA")
     expect(getIntentDescription("sync")).toContain("Sync files")
     expect(getIntentDescription("execute_document")).toContain("Execute deployment plan")
     expect(getIntentDescription("auto")).toContain("Auto-detect")
-  })
-
-  it("should return description for assets intents", () => {
-    expect(getIntentDescription("prepare_model")).toContain("model")
-    expect(getIntentDescription("prepare_dataset")).toContain("dataset")
-    expect(getIntentDescription("prepare_package")).toContain("package")
-    expect(getIntentDescription("manage_images")).toContain("image")
-    expect(getIntentDescription("prepare_repo")).toContain("repo")
   })
 })
 

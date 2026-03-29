@@ -2,11 +2,13 @@
  * Intent Parser
  *
  * Classifies user intent from natural language queries.
- * Skill metadata (path, category, kind, exposure) is sourced from skill-registry.ts
+ *
+ * Intent patterns are derived from skills/index.yml (skill.triggers).
+ * This file provides fallback patterns for intents not backed by skills.
  */
 
 import type { Intent } from "../core/state-manager"
-import { getSkillByIntent } from "./skill-registry"
+import { getSkillByIntent, getIntentToSkillMap, loadRegistry } from "./skill-registry"
 
 /**
  * Intent patterns for classification
@@ -130,19 +132,47 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
 
 /**
  * Parse intent from a natural language query
+ *
+ * Priority:
+ * 1. Skill triggers from registry (string matching, case-insensitive)
+ * 2. INTENT_PATTERNS fallback for non-skill intents
+ * 3. "auto" as default
  */
 export function parseIntent(query: string): Intent {
-  for (const [intent, patterns] of Object.entries(INTENT_PATTERNS) as [Intent, RegExp[]][]) {
-    if (intent === "auto") continue
+  loadRegistry()
+  const intentToSkill = getIntentToSkillMap()
+  const queryLower = query.toLowerCase()
 
-    for (const pattern of patterns) {
-      if (pattern.test(query)) {
-        return intent
+  // 1. Check skill triggers from registry (string matching)
+  for (const [intent, skill] of intentToSkill.entries()) {
+    if (skill.triggers) {
+      for (const trigger of skill.triggers) {
+        // String matching (case-insensitive)
+        if (queryLower.includes(trigger.toLowerCase())) {
+          return intent as Intent
+        }
       }
     }
   }
 
-  // Default to auto for unknown queries
+  // 2. Fallback to INTENT_PATTERNS for non-skill intents
+  // These are: gpu_status, validate, sync, run_container, execute_document
+  const nonSkillIntents: Intent[] = [
+    "gpu_status", "validate", "sync", "run_container", "execute_document"
+  ]
+
+  for (const intent of nonSkillIntents) {
+    const patterns = INTENT_PATTERNS[intent]
+    if (patterns) {
+      for (const pattern of patterns) {
+        if (pattern.test(query)) {
+          return intent
+        }
+      }
+    }
+  }
+
+  // 3. Default to auto for unknown queries
   return "auto"
 }
 
@@ -162,13 +192,19 @@ export function parseIntentFromKeywords(keywords: string[]): Intent {
 
 /**
  * Get intent description
+ *
+ * Uses skill.description from registry for skill-backed intents.
+ * Falls back to hardcoded descriptions for non-skill intents.
  */
 export function getIntentDescription(intent: Intent): string {
+  // 1. Try skill registry first
+  const skill = getIntentToSkillMap().get(intent)
+  if (skill?.description) {
+    return skill.description
+  }
+
+  // 2. Fallback for non-skill intents
   switch (intent) {
-    case "deploy_env":
-      return "Deploy complete MUSA environment (dependencies, driver, toolkit, container)"
-    case "update_driver":
-      return "Update or reinstall GPU driver"
     case "gpu_status":
       return "Check GPU status with mthreads-gmi"
     case "run_container":
@@ -179,20 +215,10 @@ export function getIntentDescription(intent: Intent): string {
       return "Sync files between local and remote hosts"
     case "execute_document":
       return "Execute deployment plan from document (parse document, generate plan, execute steps)"
-    case "prepare_model":
-      return "Download and prepare model files from HuggingFace/ModelScope"
-    case "prepare_dataset":
-      return "Download and prepare dataset files"
-    case "prepare_package":
-      return "Download and prepare MUSA packages (driver, toolkit, SDK)"
-    case "manage_images":
-      return "Manage Docker container images (pull, push, export, import, list, remove)"
-    case "prepare_repo":
-      return "Clone and prepare code repositories"
     case "auto":
       return "Auto-detect intent from context"
     default:
-      return "Unknown intent"
+      return `Execute ${intent} operation`
   }
 }
 

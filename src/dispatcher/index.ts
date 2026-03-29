@@ -28,6 +28,28 @@ import {
 } from "../shared/trace.js"
 import { createLogger } from "../shared/logger.js"
 import { getLarkTicket, type LarkTicket } from "../shared/lark-ticket.js"
+import { getIntentList, getIntentToSkillMap } from "./skill-registry.js"
+
+/**
+ * Build intent descriptions from skill registry
+ *
+ * Generates markdown list of intent descriptions for tool documentation.
+ */
+function buildIntentDescriptions(intents: string[]): string {
+  const intentToSkill = getIntentToSkillMap()
+  const lines: string[] = []
+
+  for (const intent of intents) {
+    const skill = intentToSkill.get(intent)
+    if (skill) {
+      lines.push(`- ${intent}: ${skill.description}`)
+    } else {
+      lines.push(`- ${intent}: Execute ${intent} operation`)
+    }
+  }
+
+  return lines.join("\n")
+}
 
 /**
  * Total steps per intent for job progress tracking
@@ -60,6 +82,8 @@ export {
   canCallSkill,
   isMetaSkill,
   isUserExposed,
+  getIntentList,
+  getIntentToSkillMap,
   type SkillMeta,
 } from "./skill-registry"
 
@@ -152,6 +176,15 @@ export interface DispatchResult {
  * Register musa_dispatch tool
  */
 export function registerDispatcherTool(api: any, stateManager: StateManager): void {
+  // Load registry and get intents from single source of truth (skills/index.yml)
+  const skillIntents = getIntentList()
+
+  // Add 'auto' for auto-detection mode
+  const intentEnum = [...skillIntents, "auto"]
+
+  // Build intent descriptions dynamically from skill registry
+  const intentDescriptions = buildIntentDescriptions(skillIntents)
+
   api.registerTool({
     name: "musa_dispatch",
     description: `Task orchestrator for MUSA operations.
@@ -161,18 +194,7 @@ Handles pre-checks, permission gating, routing to skills/tools, error handling, 
 Use this as the primary entry point for all MUSA-related operations.
 
 **Intents:**
-- deploy_env: Deploy complete MUSA environment
-- update_driver: Update or reinstall GPU driver
-- gpu_status: Check GPU status
-- validate: Validate MUSA environment
-- sync: Sync files between hosts
-- run_container: Run Docker container
-- execute_document: Execute deployment from document (parse, plan, execute)
-- prepare_model: Download and prepare model files from HuggingFace/ModelScope
-- prepare_dataset: Download and prepare dataset files
-- prepare_package: Download and prepare MUSA packages (driver, toolkit, SDK)
-- manage_images: Manage Docker container images (pull, push, export, import)
-- prepare_repo: Clone and prepare code repositories
+${intentDescriptions}
 - auto: Auto-detect intent from query`,
 
     parameters: {
@@ -180,7 +202,7 @@ Use this as the primary entry point for all MUSA-related operations.
       properties: {
         intent: {
           type: "string",
-          enum: ["deploy_env", "update_driver", "gpu_status", "run_container", "validate", "sync", "execute_document", "prepare_model", "prepare_dataset", "prepare_package", "manage_images", "prepare_repo", "auto"],
+          enum: intentEnum,
           description: "Operation intent",
         },
         context: {

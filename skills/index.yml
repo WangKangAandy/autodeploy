@@ -58,6 +58,7 @@ skills:
       - deploy MUSA environment
       - install MUSA SDK
       - full MUSA setup
+      - setup MUSA
       - 部署 MUSA 环境
       - 安装 MUSA SDK
       - 完整环境部署
@@ -253,6 +254,15 @@ skills:
     dispatch_intent: prepare_package
     dispatch_entry: 'musa_dispatch(intent="prepare_package")'
     risk_level: idempotent
+    triggers:
+      - 下载驱动包
+      - 准备驱动包
+      - 下载 musa 包
+      - 准备 musa 包
+      - download driver package
+      - download musa package
+      - 准备 toolkit
+      - 下载 toolkit
     inputs:
       required:
         - PACKAGE_TYPE  # driver | toolkit | sdk
@@ -276,6 +286,15 @@ skills:
     dispatch_intent: prepare_model
     dispatch_entry: 'musa_dispatch(intent="prepare_model")'
     risk_level: idempotent
+    triggers:
+      - 下载模型
+      - 准备模型
+      - download model
+      - pull model
+      - get model
+      - huggingface model
+      - modelscope model
+      - 模型准备
     inputs:
       required:
         - MODEL_NAME
@@ -299,6 +318,14 @@ skills:
     dispatch_intent: prepare_dataset
     dispatch_entry: 'musa_dispatch(intent="prepare_dataset")'
     risk_level: idempotent
+    triggers:
+      - 下载数据集
+      - 准备数据集
+      - download dataset
+      - pull dataset
+      - get dataset
+      - huggingface dataset
+      - 数据集准备
     inputs:
       required:
         - DATASET_NAME
@@ -322,6 +349,14 @@ skills:
     dispatch_intent: prepare_repo
     dispatch_entry: 'musa_dispatch(intent="prepare_repo")'
     risk_level: idempotent
+    triggers:
+      - 克隆仓库
+      - 准备代码
+      - clone repo
+      - git clone
+      - setup repo
+      - 代码准备
+      - 准备仓库
     inputs:
       required:
         - REPO_URL
