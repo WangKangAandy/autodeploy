@@ -69,14 +69,18 @@ const INTENT_PATTERNS: Record<Intent, RegExp[]> = {
     /文件.*同步/i,
   ],
   execute_document: [
-    // 保守触发：需要显式动作词，URL 只是候选信号
+    // 显式动作词 + 文档关键词组合
     /按文档.*(部署|执行|安装)/i,
-    /执行.*文档/i,
+    /执行.*部署.*文档/i,      // "执行部署文档"
+    /执行.*文档/i,            // "执行文档"
     /根据文档.*部署/i,
     /按照.*文档.*操作/i,
     /文档驱动/i,
+    /部署文档/i,              // "部署文档"
+    /执行部署/i,              // "执行部署" + 有文档路径
     /document.*execution/i,
     /execute.*from.*document/i,
+    /run.*deployment.*document/i,
   ],
   prepare_model: [
     /下载.*模型/i,
