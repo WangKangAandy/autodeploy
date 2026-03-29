@@ -2,7 +2,7 @@
 version: 1
 name: prepare_musa_package
 description: |
-  Discover, download, and verify MUSA packages (driver, toolkit, SDK).
+  Discover, download, and verify MUSA packages (driver, container_toolkit, SDK).
   Checks local existence before downloading from MOSS or mirror.
 
 category: assets
@@ -16,9 +16,10 @@ owners:
 
 triggers:
   - download driver
+  - download container toolkit
   - prepare MUSA package
-  - get MUSA toolkit
   - 准备驱动包
+  - 下载容器工具包
   - 下载 MUSA 包
 
 # Keep scope concise
@@ -36,6 +37,11 @@ scope:
 # Prepare MUSA Package
 
 This atomic skill discovers, downloads, and verifies MUSA software packages. It prioritizes local existence before downloading.
+
+**Package Types:**
+- `driver` — MUSA GPU driver (musa_*.deb)
+- `container_toolkit` — MT Container Toolkit (mt-container-toolkit-*.zip)
+- `sdk` — MUSA SDK (musa-sdk_*.deb)
 
 ## Invocation
 
@@ -56,7 +62,7 @@ musa_dispatch(intent="prepare_musa_package", context={
 ## When To Use This Skill
 
 - Before driver installation (prepare driver package)
-- Before toolkit installation (prepare toolkit package)
+- Before container toolkit installation (prepare mt-container-toolkit package)
 - When you need MUSA packages but don't want to install yet
 - As part of `ensure_musa_driver` or `ensure_mt_container_toolkit`
 
@@ -89,8 +95,8 @@ export MOSS_SECRET_KEY="your-secret-key"
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `PACKAGE_TYPE` | Package type: `driver` \| `toolkit` \| `sdk` | Yes | - |
-| `VERSION` | Version number (e.g., `3.3.5-server` for driver) | Yes | - |
+| `PACKAGE_TYPE` | Package type: `driver` \| `container_toolkit` \| `sdk` | Yes | - |
+| `VERSION` | Version number (e.g., `3.3.5-server` for driver, `2.0.0` for container_toolkit) | Yes | - |
 | `SOURCE` | Download source: `moss` \| `local` \| `mirror` | No | `moss` |
 | `MUSA_SDK_VERSION` | SDK version for path construction | No* | - |
 
@@ -139,7 +145,7 @@ case "$PACKAGE_TYPE" in
             fi
         done
         ;;
-    toolkit)
+    container_toolkit)
         for name in "mt-container-toolkit-${VERSION}.zip" "container_toolkit_${VERSION}.zip"; do
             if [ -f "./musa_packages/$name" ]; then
                 PACKAGE_PATH="./musa_packages/$name"
@@ -205,13 +211,14 @@ if [ -z "$PACKAGE_PATH" ]; then
                     fi
                     ;;
 
-                toolkit)
-                    # Download toolkit from configured URL or MOSS
+                container_toolkit)
+                    # Download container toolkit from configured URL
                     TOOLKIT_CONFIG="${PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo '.')}/skills/config/env/container_toolkit.yml"
-                    TOOLKIT_URL=$(yq '.toolkits[] | select(.version == "'${VERSION}'") | .url' "$TOOLKIT_CONFIG")
+                    # YAML is a list at root level, filter by version
+                    TOOLKIT_URL=$(yq '.[] | select(.version == "'${VERSION}'") | .url' "$TOOLKIT_CONFIG" | head -n 1)
                     if [ -n "$TOOLKIT_URL" ]; then
-                        wget -O ./musa_packages/container_toolkit.zip "$TOOLKIT_URL"
-                        PACKAGE_PATH="./musa_packages/container_toolkit.zip"
+                        wget -O ./musa_packages/mt-container-toolkit-${VERSION}.zip "$TOOLKIT_URL"
+                        PACKAGE_PATH="./musa_packages/mt-container-toolkit-${VERSION}.zip"
                     fi
                     ;;
             esac
