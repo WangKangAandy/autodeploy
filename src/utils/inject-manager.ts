@@ -17,11 +17,14 @@ interface BlockMarkers {
   end: string
 }
 
+type InjectMode = "block" | "wholeFile"
+
 interface InjectSource {
   key: string
   sourceFile: string
   targetFile: string
-  markers: BlockMarkers
+  mode: InjectMode
+  markers?: BlockMarkers  // required for "block" mode
   required: boolean
 }
 
@@ -48,6 +51,7 @@ export const INJECT_SOURCES: InjectSource[] = [
     key: "agents",
     sourceFile: "AGENTS.autodeploy.md",
     targetFile: "AGENTS.md",
+    mode: "block",
     markers: {
       begin: "<!-- AUTODEPLOY:BEGIN -->",
       end: "<!-- AUTODEPLOY:END -->",
@@ -58,10 +62,18 @@ export const INJECT_SOURCES: InjectSource[] = [
     key: "identity",
     sourceFile: "IDENTITY.autodeploy.md",
     targetFile: "IDENTITY.md",
+    mode: "block",
     markers: {
       begin: "<!-- AUTODEPLOY:IDENTITY:BEGIN -->",
       end: "<!-- AUTODEPLOY:IDENTITY:END -->",
     },
+    required: true,
+  },
+  {
+    key: "bootstrap",
+    sourceFile: "BOOTSTRAP.autodeploy.md",
+    targetFile: "BOOTSTRAP.md",
+    mode: "wholeFile",
     required: true,
   },
 ]
@@ -234,6 +246,27 @@ function doInject(targetPath: string, sourceContent: string, statusResult: Block
   return { status: "up_to_date" }
 }
 
+/**
+ * Whole-file injection: create or overwrite the target file entirely.
+ * - If target doesn't exist → create it
+ * - If target exists with same content → skip (up_to_date)
+ * - If target exists with different content → overwrite (updated)
+ */
+function injectWholeFile(targetPath: string, sourceContent: string): InjectResult {
+  if (!fs.existsSync(targetPath)) {
+    atomicWrite(targetPath, sourceContent)
+    return { status: "installed" }
+  }
+
+  const existing = fs.readFileSync(targetPath, "utf-8")
+  if (normalizeContent(existing) === normalizeContent(sourceContent)) {
+    return { status: "up_to_date" }
+  }
+
+  atomicWrite(targetPath, sourceContent)
+  return { status: "updated" }
+}
+
 function injectSource(workspacePath: string, injectDir: string, source: InjectSource): InjectResult {
   try {
     const sourcePath = path.join(injectDir, source.sourceFile)
@@ -250,13 +283,19 @@ function injectSource(workspacePath: string, injectDir: string, source: InjectSo
     const sourceContent = fs.readFileSync(sourcePath, "utf-8")
 
     return withLockSync(lockPath, () => {
-      const statusResult = checkBlockStatus(targetPath, sourceContent, source.markers)
+      // Whole-file mode: simple create/overwrite
+      if (source.mode === "wholeFile") {
+        return injectWholeFile(targetPath, sourceContent)
+      }
+
+      // Block mode: merge into existing file
+      const statusResult = checkBlockStatus(targetPath, sourceContent, source.markers!)
 
       if (statusResult.status === "up_to_date") {
         return { status: "up_to_date" as const }
       }
 
-      return doInject(targetPath, sourceContent, statusResult, source.markers)
+      return doInject(targetPath, sourceContent, statusResult, source.markers!)
     }) as InjectResult
   } catch (err: any) {
     return { status: "failed", reason: err.message }
@@ -288,9 +327,17 @@ export function uninjectAll(workspacePath: string): Record<string, { status: str
       continue
     }
 
+    // Whole-file mode: delete the entire file
+    if (source.mode === "wholeFile") {
+      fs.unlinkSync(targetPath)
+      results[source.key] = { status: "removed" }
+      continue
+    }
+
+    // Block mode: remove the block from the file
     const existing = fs.readFileSync(targetPath, "utf-8")
 
-    if (!existing.includes(source.markers.begin)) {
+    if (!source.markers || !existing.includes(source.markers.begin)) {
       results[source.key] = { status: "skipped", reason: "Block not found" }
       continue
     }
@@ -317,8 +364,16 @@ export function checkInjected(workspacePath: string): Record<string, boolean> {
       status[source.key] = false
       continue
     }
+
+    // Whole-file mode: file exists = injected
+    if (source.mode === "wholeFile") {
+      status[source.key] = true
+      continue
+    }
+
+    // Block mode: check for marker presence
     const content = fs.readFileSync(targetPath, "utf-8")
-    status[source.key] = content.includes(source.markers.begin)
+    status[source.key] = !!source.markers && content.includes(source.markers.begin)
   }
 
   return status
