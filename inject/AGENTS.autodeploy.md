@@ -89,6 +89,13 @@ musa_dispatch(intent="execute_document", action="resume", context={operationId: 
 
 **Execution Flow:** Load → Parse → Plan → Safety → Review → Execute
 
+### Shell Execution Rule
+
+SKILL.md bash snippets are **multi-line script fragments**. When executing via `musa_exec`:
+- Pass the entire step as a multi-line script string
+- **Never** join `if/fi`, `case/esac`, or loops with `&&` on a single line
+- Control structures require newlines or semicolons between clauses
+
 ### Fallback Behavior
 
 If `musa_dispatch` fails:
