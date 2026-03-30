@@ -8,13 +8,12 @@
 
 import * as fs from "fs"
 import type { StateManager, Intent } from "../core/state-manager.js"
-import { getSkillPath, getSkillByIntent } from "./skill-registry.js"
+// skill-registry removed — OpenClaw native skill discovery handles SKILL.md routing
 import { generateTraceId, startSpan, finishSpan } from "../shared/trace.js"
 import { createLogger } from "../shared/logger.js"
 import { getLarkTicket } from "../shared/lark-ticket.js"
 
-// Re-exports (for context-builder and other consumers)
-export { getSkillMeta, getSkillPath, getIntentList, getIntentToSkillMap } from "./skill-registry.js"
+
 
 // ============================================================================
 // Types
@@ -242,14 +241,8 @@ function buildOperationGuidance(intent: string, context: Record<string, unknown>
   lines.push(`## Operation: ${intent}`)
   lines.push(`**Status**: started`)
 
-  // If there's a matching skill, reference its SKILL.md
-  const skill = getSkillByIntent(intent)
-  const skillPath = skill ? getSkillPath(skill.id) : null
-  if (skillPath) {
-    lines.push(`**Skill reference**: ${skillPath}`)
-    lines.push("")
-    lines.push("Read the skill file above for detailed execution steps.")
-  }
+  lines.push("")
+  lines.push("Check available skills for detailed execution steps.")
 
   if (Object.keys(context).length > 0) {
     lines.push("")
