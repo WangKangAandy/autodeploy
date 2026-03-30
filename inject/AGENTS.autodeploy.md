@@ -67,13 +67,11 @@ When investigating issues from Feishu/Dingding:
 ```bash
 # 1. Get messageId from Feishu message URL
 
-# 2. Search logs by traceId (= messageId)
-grep "traceId.*<messageId>" .claude/remote-exec.log
+# 2. Search state by traceId (= messageId)
 cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
 ```
 
 Log locations:
-- Tool execution: `.claude/remote-exec.log`
 - State persistence: `autodeploy/operations.json`, `autodeploy/jobs.json`
 
 ### Document-Driven Execution

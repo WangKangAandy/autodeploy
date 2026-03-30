@@ -82,6 +82,21 @@ export async function buildDynamicContext(stateManager: StateManager): Promise<s
     }
   }
 
+  // Recent tool executions
+  try {
+    const recentExecs = await stateManager.getRecentToolExecutions(5)
+    if (recentExecs.length > 0) {
+      lines.push("", "## Recent Tool Executions")
+      for (const exec of recentExecs) {
+        const icon = exec.success ? "✓" : "✗"
+        const cmd = exec.command.length > 80 ? exec.command.substring(0, 77) + "..." : exec.command
+        lines.push(`- ${icon} \`${cmd}\` (${exec.durationMs}ms)`)
+      }
+    }
+  } catch {
+    // Silently skip if tool executions not available
+  }
+
   lines.push(
     "",
     "## Quick Actions",

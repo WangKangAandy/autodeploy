@@ -12,13 +12,13 @@
 
 | 日志 | 路径 |
 |------|------|
-| 工具执行 | `.claude/remote-exec.log` |
+| 工具执行 | plugin logs |
 | 操作状态 | `autodeploy/operations.json` |
 
 ## 调试命令
 
 ```bash
-grep "traceId.*<id>" .claude/remote-exec.log
+grep "traceId.*<id>" plugin logs
 cat autodeploy/operations.json | jq '.[] | select(.traceId == "<id>")'
 ```
 

@@ -216,6 +216,18 @@ export interface DocumentExecutionState {
   error?: string
 }
 
+export interface ToolExecution {
+  tool: string
+  command: string
+  exitCode: number
+  success: boolean
+  durationMs: number
+  stdoutPreview?: string
+  stderrPreview?: string
+  error?: string
+  timestamp: string
+}
+
 // ============================================================================
 // State Manager Class
 // ============================================================================
@@ -1129,9 +1141,32 @@ export class StateManager {
         }
       case "document_executions.json":
         return []
+      case "tool-executions.json":
+        return []
       default:
         return {}
     }
+  }
+
+  // ============================================================================
+  // Tool Execution Recording
+  // ============================================================================
+
+  async recordToolExecution(exec: ToolExecution): Promise<void> {
+    this.assertReady()
+    const executions = await this.loadState<ToolExecution[]>("tool-executions.json")
+    executions.push(exec)
+    // Ring buffer: keep last 200
+    if (executions.length > 200) {
+      executions.splice(0, executions.length - 200)
+    }
+    await this.saveState("tool-executions.json", executions)
+  }
+
+  async getRecentToolExecutions(limit = 5): Promise<ToolExecution[]> {
+    this.assertReady()
+    const executions = await this.loadState<ToolExecution[]>("tool-executions.json")
+    return executions.slice(-limit)
   }
 }
 

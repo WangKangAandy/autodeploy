@@ -2,9 +2,9 @@
   "name": "openclaw-musa",
   "version": "1.0.0",
   "description": "OpenClaw platform runtime layer for MUSA SDK environment deployment",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r inject dist/",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
@@ -12,9 +12,8 @@
     "uninstall-plugin": "node scripts/install.js uninstall"
   },
   "files": [
-    "index.js",
-    "openclaw.plugin.json",
     "dist/**/*",
+    "openclaw.plugin.json",
     "src/**/*",
     "scripts/**/*",
     "AGENTS.autodeploy.md",
@@ -35,6 +34,7 @@
     "yaml": "^2.8.3"
   },
   "devDependencies": {
+    "@types/ssh2": "^1.15.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
@@ -47,7 +47,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.js"
+      "./dist/index.js"
     ],
     "installHook": "./scripts/install.js"
   }

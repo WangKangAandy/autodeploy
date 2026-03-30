@@ -21,9 +21,9 @@ Three tools bridge Machine A and the Remote MT-GPU Machine:
 
 | Tool | Purpose |
 |------|---------|
-| `remote-exec` | Execute a shell command on the Remote MT-GPU Machine host via SSH |
-| `remote-docker` | Execute a command inside a Docker container on the Remote MT-GPU Machine via SSH. Supports both `docker exec` (reuse named container) and `docker run` (one-shot) |
-| `remote-sync` | Sync files between Machine A and the Remote MT-GPU Machine via rsync over SSH. Supports `push` (local to remote) and `pull` (remote to local) |
+| `musa_exec` | Execute a shell command on the Remote MT-GPU Machine host via SSH |
+| `musa_docker` | Execute a command inside a Docker container on the Remote MT-GPU Machine via SSH. Supports both `docker exec` (reuse named container) and `docker run` (one-shot) |
+| `musa_sync` | Sync files between Machine A and the Remote MT-GPU Machine via rsync over SSH. Supports `push` (local to remote) and `pull` (remote to local) |
 
 ---
 
@@ -33,11 +33,11 @@ When a skill describes a command to run, route it to the correct tool based on t
 
 | Skill describes...                                | You use...                                                                  |
 |---------------------------------------------------|-----------------------------------------------------------------------------|
-| `docker exec <container> <cmd>`                   | `remote-docker` with `name=<container>`, `command=<cmd>`                    |
-| `docker run ... <image> <cmd>`                    | `remote-docker` with `image=<image>`, `command=<cmd>` (one-shot, no name)   |
-| `docker cp`, `docker logs`, other docker commands | `remote-exec` wrapping the full docker command as the command string        |
-| Bare-metal host commands (`dpkg`, `systemctl`, `nvidia-smi`, etc.) | `remote-exec` with `command=<cmd>`                      |
-| File transfer between Machine A and Remote MT-GPU Machine | `remote-sync` with appropriate direction (`push` or `pull`)       |
+| `docker exec <container> <cmd>`                   | `musa_docker` with `name=<container>`, `command=<cmd>`                    |
+| `docker run ... <image> <cmd>`                    | `musa_docker` with `image=<image>`, `command=<cmd>` (one-shot, no name)   |
+| `docker cp`, `docker logs`, other docker commands | `musa_exec` wrapping the full docker command as the command string        |
+| Bare-metal host commands (`dpkg`, `systemctl`, `nvidia-smi`, etc.) | `musa_exec` with `command=<cmd>`                      |
+| File transfer between Machine A and Remote MT-GPU Machine | `musa_sync` with appropriate direction (`push` or `pull`)       |
 | Local-only commands (`git`, file reads, code edits) | Standard local tools (Bash, Read, Edit, Write). NOT remote tools          |
 
 ---
@@ -47,11 +47,11 @@ When a skill describes a command to run, route it to the correct tool based on t
 The typical remote workflow cycle is:
 
 1. **Edit code locally** on Machine A using standard file editing tools
-2. **Push code** to the Remote MT-GPU Machine via `remote-sync` (direction: `push`)
-3. **Execute remotely** — build, test, profile, or verify via `remote-docker` (in-container) or `remote-exec` (host-level)
-4. **Pull results** back to Machine A via `remote-sync` (direction: `pull`) if build artifacts, logs, or profiling data are needed locally
+2. **Push code** to the Remote MT-GPU Machine via `musa_sync` (direction: `push`)
+3. **Execute remotely** — build, test, profile, or verify via `musa_docker` (in-container) or `musa_exec` (host-level)
+4. **Pull results** back to Machine A via `musa_sync` (direction: `pull`) if build artifacts, logs, or profiling data are needed locally
 
-Not every step is needed every time. For example, if you only need to check a driver version, step 1-2 can be skipped — just call `remote-exec` directly.
+Not every step is needed every time. For example, if you only need to check a driver version, step 1-2 can be skipped — just call `musa_exec` directly.
 
 ---
 
@@ -67,14 +67,14 @@ All repos — primary project and selected deps — follow the same three-tier p
 
 The container mounts `~/workspace` → `/workspace` via `-v /home/${GPU_USER}/workspace:/workspace`. Every repo synced into `~/workspace/` on the remote host is automatically visible inside the container at `/workspace/`.
 
-### remote-sync convention
+### musa_sync convention
 
 | Direction | `local_path` | `remote_path` |
 |-----------|-------------|---------------|
 | **push** | `repositories/<project-name>/` | `workspace/<project-name>/` |
 | **pull** | `repositories/<project-name>/` | `workspace/<project-name>/` |
 
-### remote-docker convention
+### musa_docker convention
 
 - **Working directory** inside container: `/workspace/<project-name>/`
 - **Build commands**: `cd /workspace/<project-name>/ && ...`
@@ -94,55 +94,28 @@ Each musifier syncs its own repo independently. All repos share the same contain
 
 ---
 
-## Credential Flow and Availability
+## Credentials
 
-The remote tools read credentials from two sources (in order of priority):
-
-1. **Environment variables** (`process.env`) — set before starting the agent, or injected by the MCP server
-2. **Config file** (`agent-tools/config/remote-ssh.env`) — fallback when env vars are not set. Simple `KEY=VALUE` format, one per line. This file is gitignored (contains credentials).
+Credentials are set dynamically via `musa_set_mode` tool at runtime. Required parameters:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GPU_HOST` | yes | Remote MT-GPU Machine hostname or IP |
-| `GPU_USER` | yes | SSH username |
-| `GPU_SSH_PASSWD` | yes | SSH password |
-| `GPU_PORT` | no | SSH port (default: 22) |
-| `GPU_WORK_DIR` | no | Default remote working directory (default: ~) |
-| `TORCH_MUSA_DOCKER_IMAGE` | no | Default Docker image for `remote-docker` one-shot runs |
-
-### When Credentials Become Available
-
-Credentials are collected by the **director** **upfront** — before any pipeline work begins. The director writes them to `agent-tools/config/remote-ssh.env` and the MCP server loads these env vars for all subsequent tool calls.
-
-**Stage 0** (sdk-version): remote tools are available but typically not needed (version resolution uses GitHub API, Harbor API, local git, and MOSS S3).
-
-**Stage 1** (parallel preparation): remote tools are used by the **lookuper** (task: `prepare-docker`) to pull the Docker image and launch the container on the Remote MT-GPU Machine. The **reader** and the **lookuper** (task: `prepare-document-site`) stay local and do not use remote tools.
-
-**Stage 2** (api-mapping): the **lookuper** uses `remote-docker` to verify mappings against SDK headers inside the running container (set up in Stage 1).
-
-**Stage 3** (adaptation): remote tools are fully used by **musifier** and **optimizer** for all builds, tests, and profiling inside the container.
+| `host` | yes | Remote MT-GPU Machine hostname or IP |
+| `user` | yes | SSH username |
+| `password` | yes | SSH password |
+| `port` | no | SSH port (default: 22) |
 
 ---
 
 ## Rules
 
-1. **NEVER use the Bash tool for any command targeting the Remote MT-GPU Machine.** Always use `remote-exec`, `remote-docker`, or `remote-sync`.
-2. **Use `remote-docker` for all in-container execution** — compilation, tests, profiling, GPU workloads.
-3. **Use `remote-exec` for host-level commands** on the Remote MT-GPU Machine — driver checks, docker management, package installs, file operations on the host filesystem.
-4. **Use `remote-sync` for file transfer** between Machine A and the Remote MT-GPU Machine.
+1. **NEVER use the Bash tool for any command targeting the Remote MT-GPU Machine.** Always use `musa_exec`, `musa_docker`, or `musa_sync`.
+2. **Use `musa_docker` for all in-container execution** — compilation, tests, profiling, GPU workloads.
+3. **Use `musa_exec` for host-level commands** on the Remote MT-GPU Machine — driver checks, docker management, package installs, file operations on the host filesystem.
+4. **Use `musa_sync` for file transfer** between Machine A and the Remote MT-GPU Machine.
 5. **Use the Bash tool ONLY for local operations** on Machine A — git, local file reads, local scripts.
-6. **Never hardcode credentials or connection details.** They are injected via environment variables by the `remote-ssh` plugin.
-7. **Container name and Docker image are provided by the director** (from musa-install output and lookuper output respectively). Never hardcode them.
-8. **Gracefully handle missing credentials.** If a remote tool fails because env vars are not set, do not retry — report the issue to the director. Credentials may not yet be collected.
+6. **Never hardcode credentials or connection details.** They are set via `musa_set_mode` at runtime.
+7. **Container name and Docker image are provided by the user or skill configuration.** Never hardcode them.
+8. **Gracefully handle missing credentials.** If a remote tool fails because mode is not set, prompt the user to run `musa_set_mode`.
 
----
 
-## MCP Server: agent-tools
-
-The `agent-tools/` MCP server provides remote execution tools:
-
-- `remote-exec` — execute shell commands on the Remote MT-GPU Machine host via SSH
-- `remote-docker` — execute commands in Docker containers on the Remote MT-GPU Machine
-- `remote-sync` — sync files between local and remote via rsync
-
-Credentials are loaded from environment variables or `agent-tools/config/remote-ssh.env`.

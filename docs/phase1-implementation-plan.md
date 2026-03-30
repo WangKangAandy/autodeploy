@@ -207,7 +207,6 @@ skills/
 
 #### P2-1: utils 重复
 
-`src/core/utils.js` 和 `agent-tools/src/shared/utils.ts` 完全重复（~70 行）
 
 **建议**: 提取到 `src/shared/utils.ts`
 
@@ -215,7 +214,6 @@ skills/
 
 #### P2-2: SSH 执行逻辑重复
 
-`src/core/ssh-client.js` 和 `agent-tools/src/core/executors.ts` 重复
 
 **建议**: 提取共享逻辑
 

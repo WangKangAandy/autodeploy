@@ -50,7 +50,6 @@
 **claude-remote-mt-gpu-tools/ 插件：**
 
 ✅ **完全符合 Claude MCP 标准：**
-- 标准 `.mcp.json` 配置文件
 - 使用官方 `@modelcontextprotocol/sdk` (v1.0.4)
 - 正确的工具注册和请求处理
 - 符合 MCP 协议的工具描述格式
@@ -68,7 +67,6 @@
 
 ❌ **不符合 Claude MCP 标准：**
 - 使用 OpenCode 专用协议，非标准 MCP
-- 无 `.mcp.json` 配置
 - 无法被 Claude 生态直接使用
 - 缺少标准化的工具接口
 
@@ -106,7 +104,6 @@
 
 ❌ **工具系统不一致：**
 - OpenCode 工具和 Claude MCP 工具并存
-- remote-sync 功能缺失（OpenCode）
 - 架构差异大，维护成本高
 
 ### 3. 构建系统质量 - 7/10 ✅
@@ -312,9 +309,9 @@
 
 | 功能 | OpenCode | Claude MCP |
 |------|----------|------------|
-| remote-exec | ✅ 已实现 | ✅ 已实现 |
-| remote-docker | ✅ 已实现 | ✅ 已实现 |
-| remote-sync | ❌ 未实现 | ✅ 已实现 |
+| musa_exec | ✅ 已实现 | ✅ 已实现 |
+| musa_docker | ✅ 已实现 | ✅ 已实现 |
+| musa_sync | ❌ 未实现 | ✅ 已实现 |
 | SSH 库 | sshpass | ssh2 |
 | TypeScript | 直接运行 | 编译后运行 |
 | 类型安全 | 无 | 完整 |

@@ -9,9 +9,6 @@ When instructions conflict, prefer `skills/` workflow definitions over `docs/` r
 
 | Path | Purpose |
 |------|---------|
-| `agent-tools/src/core/` | Core executors: execRemote, execDocker, syncFiles |
-| `agent-tools/src/tools/` | MCP tool definitions for remote execution |
-| `agent-tools/src/server.ts` | MCP Server entry point |
 | `skills/deploy_musa_base_env/SKILL.md` | Primary source for automated deployment workflow |
 | `skills/update_musa_driver/SKILL.md` | Targeted workflow for driver-only operations |
 | `skills/deploy_musa_base_env/config/sdk_compatibility.yml` | SDK/driver/environment/supported-image compatibility mapping |
@@ -19,14 +16,6 @@ When instructions conflict, prefer `skills/` workflow definitions over `docs/` r
 | `references/container-validation-runbook.md` | Troubleshooting runbook for container validation failures |
 | `docs/单机环境部署.md` | Reference notes for manual single-machine deployment |
 | `docs/环境问题FAQ.md` | Known environment issues and recovery notes |
-
-## Build Commands
-
-### Agent Tools
-
-```bash
-cd agent-tools && npm install && npm run build
-```
 
 ## Test Commands
 
@@ -91,8 +80,8 @@ docker exec torch_musa_test python -c "import torch; print(torch.musa.is_availab
 
 Follow `references/remote-execution-policy.md` when commands target the Remote MT-GPU Machine.
 
-- Use `remote-exec` for host-level remote commands such as `dpkg`, `systemctl`, driver checks, and Docker management.
-- Use `remote-docker` for commands that should run inside a remote container.
+- Use `musa_exec` for host-level remote commands such as `dpkg`, `systemctl`, driver checks, and Docker management.
+- Use `musa_docker` for commands that should run inside a remote container.
 - Use local file tools and local shell only for workspace inspection, editing, and local dependency work.
 - Do not replace remote steps with local Bash commands.
 
@@ -104,8 +93,7 @@ Follow `references/remote-execution-policy.md` when commands target the Remote M
 The policy docs assume `~/workspace` is mounted into the container as `/workspace`.
 
 ## Credentials And State
-- Remote credentials come from environment variables or `agent-tools/config/remote-ssh.env`.
-- Expected vars: `GPU_HOST`, `GPU_USER`, `GPU_SSH_PASSWD`, optional `GPU_PORT`, `GPU_WORK_DIR`, `TORCH_MUSA_DOCKER_IMAGE`.
+- Remote credentials are set via `musa_set_mode` tool at runtime.
 - Host install flows may also use `MY_SUDO_PASSWD` for privileged package installation.
 - Do not assume Docker registry auth is required for local SDK 4.3.1 installation unless the active skill or the user explicitly requires a private image pull.
 - State files mentioned by docs include `./.musa_sdk_install_state.json` and `./.musa_deployment_state.json`.
@@ -278,9 +266,6 @@ When debugging issues reported from Feishu, use traceId to trace the call chain:
 
 **Log Locations:**
 ```bash
-# Tool execution logs
-.claude/remote-exec.log
-
 # State persistence
 autodeploy/operations.json
 autodeploy/jobs.json
@@ -290,10 +275,7 @@ autodeploy/jobs.json
 ```bash
 # 1. Get messageId from Feishu (visible in message URL)
 
-# 2. Search logs
-grep "traceId.*<messageId>" .claude/remote-exec.log
-
-# 3. Check operation state
+# 2. Check operation state
 cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
 ```
 

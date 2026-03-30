@@ -16,7 +16,6 @@
 | 静态规则注入 | AGENTS.md 合并 | ✅ 已通过插件自举实现 | `src/utils/agents-merge.js` |
 | 动态上下文注入 | `before_prompt_build` hook | ✅ 完整实现 | `src/adapter/hooks.ts` |
 | 本地/远程双模执行 | Executor | ✅ 完整实现 | `src/core/executor.js` |
-| MCP Server | Agent Tools | ✅ 完整实现 | `agent-tools/src/` |
 
 **说明**：
 - **文档驱动执行**：V1 只支持高确定性解析，外部文档源（飞书/钉钉）和完整应用层能力待扩展

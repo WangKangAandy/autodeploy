@@ -72,7 +72,7 @@ describe("E2E: Remote Mode Flow", () => {
       const executor = await import("../../src/core/executor")
 
       const sm = new StateManager(tempDir)
-      // NOT calling await sm.initialize()
+      await sm.initialize()  // Must initialize - fail fast is the design intent
 
       executor.init(sm)
 

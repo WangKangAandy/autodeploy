@@ -39,24 +39,6 @@ npm install
 npm run build  # 编译 TypeScript 模块
 ```
 
-### 配置远程访问
-
-```bash
-cp agent-tools/config/remote-ssh.env.example agent-tools/config/remote-ssh.env
-# 编辑配置文件
-```
-
-必需变量：
-
-```env
-GPU_HOST=<remote-gpu-ip>
-GPU_USER=<ssh-username>
-GPU_SSH_PASSWD=<ssh-password>
-MY_SUDO_PASSWD=<optional-sudo-password>
-GPU_PORT=22
-TORCH_MUSA_DOCKER_IMAGE=<default-docker-image>
-```
-
 ### 安装为 OpenClaw 插件
 
 ```bash
@@ -116,17 +98,6 @@ musa_dispatch(intent="execute_document", context={content: "# Guide\n..."})
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    agent-tools/                             │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ core/executors.ts                                    │  │
-│  │ - execRemote(config, command)                        │  │
-│  │ - execDocker(config, args)                           │  │
-│  │ - syncFiles(config, args)                            │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
 │                 Remote MT-GPU Machine                       │
 │  ┌─────────────────┐  ┌─────────────────────────────────┐  │
 │  │ Host (via SSH)  │  │ Docker Containers (MUSA SDK)    │  │
@@ -145,7 +116,6 @@ musa_dispatch(intent="execute_document", context={content: "# Guide\n..."})
 | `src/utils/agents-merge.js` | AGENTS.md 合并逻辑 |
 | `src/document/` | 文档驱动执行引擎 |
 | `AGENTS.autodeploy.md` | 平台静态规则（自动合并到 workspace） |
-| `agent-tools/` | MCP 工具层，提供 remote-exec/docker/sync |
 | `skills/` | 可执行技能定义 |
 | `references/` | 非执行性知识资源 |
 
@@ -181,11 +151,7 @@ docker exec torch_musa_test python -c "import torch; print(torch.musa.is_availab
 ## 运行测试
 
 ```bash
-# 根目录测试
 npm test
-
-# agent-tools 测试
-cd agent-tools && npm test
 ```
 
 ## 部署范围
