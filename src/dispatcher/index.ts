@@ -1,212 +1,331 @@
+/**
+ * Dispatcher — operation lifecycle manager
+ *
+ * NOT a router. The LLM decides what to do.
+ * This module handles: operation tracking, conflict detection, tracing,
+ * and execution contracts for document-driven deployment.
+ */
+
 import * as fs from "fs"
 import type { StateManager, Intent } from "../core/state-manager.js"
-import { route, getRiskLevel, type RouteResult } from "./route-table.js"
-import { getIntentList, getIntentToSkillMap, getSkillMeta, getSkillPath } from "./skill-registry.js"
+import { getSkillPath, getSkillByIntent } from "./skill-registry.js"
 import { generateTraceId, startSpan, finishSpan } from "../shared/trace.js"
 import { createLogger } from "../shared/logger.js"
 import { getLarkTicket } from "../shared/lark-ticket.js"
+
+// Re-exports (for context-builder and other consumers)
+export { getSkillMeta, getSkillPath, getIntentList, getIntentToSkillMap } from "./skill-registry.js"
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface DispatchParams {
   intent: Intent
   context?: Record<string, unknown>
   action?: "start" | "status" | "resume" | "cancel"
   force?: boolean
-  query?: string
 }
 
 export interface DispatchResult {
   success: boolean
   intent: Intent
   operationId: string | null
+  traceId: string
   error: string | null
   guidance: string
 }
 
-// Re-exports
-export { route, getRiskLevel, type RouteResult } from "./route-table"
-export { getSkillMeta, getSkillPath, getIntentList, getIntentToSkillMap } from "./skill-registry"
+// ============================================================================
+// Execution Contract
+// ============================================================================
+
+/**
+ * Build an execution contract from a document.
+ *
+ * An execution contract wraps a deployment document with:
+ * 1. Strict execution rules (no early exit, must handle failures)
+ * 2. The original document content
+ * 3. Reporting requirements
+ *
+ * This is NOT a parser. We don't extract steps from the document.
+ * The LLM reads the document and decides the steps.
+ * The contract constrains HOW the LLM executes, not WHAT it executes.
+ */
+function buildExecutionContract(docContent: string, source: string): string {
+  return `## Execution Contract
+
+### Execution Rules (MUST follow)
+1. **No early exit**: Execute ALL steps in the document. Do NOT stop at the first failure.
+2. **Fix before giving up**: If a step fails (file not found, command error, path mismatch):
+   - Search for alternatives (e.g., \`find /data -name "ModelName*" -maxdepth 3\`)
+   - Try common path variations
+   - Check environment variables
+   - Only report as blocked if 3+ attempts fail on the same step
+3. **Verify each step**: After each command, check the output matches expectations.
+4. **Adapt paths**: Document paths may not match the actual filesystem. Always verify and adapt.
+5. **Report progress**: After completing each major section, briefly state what was done.
+
+### Stop conditions (ONLY these allow stopping)
+- Remote machine is unreachable (SSH connection failed)
+- User explicitly says "stop" or "cancel"
+- A step requires credentials/permissions you don't have (after asking user)
+
+### Document
+**Source**: ${source}
+
+---
+
+${docContent}
+
+---
+
+### After completion
+Report: steps executed, any adaptations made, final status.`
+}
+
+// ============================================================================
+// Risk classification
+// ============================================================================
+
+const DESTRUCTIVE_INTENTS = new Set([
+  "deploy_env", "update_driver", "execute_document",
+])
+
+function isDestructive(intent: string): boolean {
+  return DESTRUCTIVE_INTENTS.has(intent)
+}
+
+// ============================================================================
+// Tool registration
+// ============================================================================
 
 export function registerDispatcherTool(api: any, stateManager: StateManager): void {
-  const skillIntents = getIntentList()
-  const nonSkillIntents = ["gpu_status", "validate", "sync", "run_container", "execute_document"]
-  const intentEnum = [...skillIntents, ...nonSkillIntents, "auto"]
-
-  // Build description from skill registry
-  const intentToSkill = getIntentToSkillMap()
-  const descriptions = intentEnum
-    .filter((i) => i !== "auto")
-    .map((i) => {
-      const skill = intentToSkill.get(i)
-      return `- ${i}: ${skill?.description ?? i}`
-    })
-    .join("\n")
-
   api.registerTool({
     name: "musa_dispatch",
-    description: `Task orchestrator for MUSA operations.\n\nIntents:\n${descriptions}\n- auto: Auto-detect intent from query`,
+    description: `Operation lifecycle manager for MUSA deployments.
+
+Use this to:
+- Track deployment operations (start/status/resume/cancel)
+- Execute documents with an execution contract (enforces completion)
+- Detect conflicting operations on the same host
+
+Do NOT use this for simple commands — use musa_exec directly.`,
     parameters: {
       type: "object",
       properties: {
-        intent: { type: "string", enum: intentEnum, description: "Operation intent" },
-        context: { type: "object", description: "Additional context" },
+        intent: {
+          type: "string",
+          description: "Operation type: deploy_env, update_driver, execute_document, prepare_model, prepare_dataset, prepare_package, prepare_repo, gpu_status, validate, sync, run_container",
+        },
+        context: { type: "object", description: "Operation context (path, VERSION, etc.)" },
         action: {
           type: "string",
           enum: ["start", "status", "resume", "cancel"],
           default: "start",
+          description: "start=new operation, status=check progress, resume=continue paused, cancel=abort",
         },
-        force: { type: "boolean", default: false },
-        query: { type: "string", description: "Natural language query (for auto intent)" },
+        force: { type: "boolean", default: false, description: "Skip confirmation for destructive ops" },
       },
       required: ["intent"],
     },
     async execute(_toolCallId: string, params: DispatchParams): Promise<string> {
       const result = await dispatch(params, stateManager)
-      return result.error ?? result.guidance
+      return JSON.stringify(result, null, 2)
     },
   })
 }
 
+// ============================================================================
+// Dispatch logic
+// ============================================================================
+
 export async function dispatch(
   params: DispatchParams,
-  stateManager: StateManager
+  stateManager: StateManager,
 ): Promise<DispatchResult> {
   const { intent, context = {}, action = "start", force = false } = params
   const logger = createLogger("dispatcher")
 
-  // 1. For 'auto', ask for explicit intent
-  if (intent === "auto") {
-    return {
-      success: false,
-      intent,
-      operationId: null,
-      error: "Could not determine intent. Please specify explicitly.",
-      guidance: "",
-    }
-  }
-
-  // 2. Risk check
-  const risk = getRiskLevel(intent)
-  if (risk === "destructive" && !force) {
-    return {
-      success: false,
-      intent,
-      operationId: null,
-      error: `Operation "${intent}" is destructive. Pass force=true to confirm.`,
-      guidance: "",
-    }
-  }
-
-  // 3. Mode check (informational only)
-  await stateManager.getExecutionMode()
-
-  // 4. Trace
+  // Trace
   const larkTicket = getLarkTicket()
   const traceId = larkTicket?.messageId ?? generateTraceId()
-  const span = startSpan("dispatch", { intent })
+  const span = startSpan("dispatch", { intent, action })
 
-  // 5. Start operation for destructive ops
-  let operationId: string | null = null
-  if (risk === "destructive" && action === "start") {
-    const result = await stateManager.startOperationIfNoConflict(intent as Intent, context, {
+  // Status/resume/cancel: delegate to state manager
+  if (action !== "start") {
+    return handleLifecycleAction(action, intent, context, traceId, stateManager)
+  }
+
+  // Destructive ops: confirm + conflict check
+  if (isDestructive(intent) && !force) {
+    finishSpan(span, "error", { code: "BLOCKED", message: "needs_confirmation" })
+    return {
+      success: false,
+      intent,
+      operationId: null,
       traceId,
-    })
+      error: `"${intent}" is destructive. Set force=true to confirm.`,
+      guidance: "",
+    }
+  }
+
+  // Start operation (for trackable intents)
+  let operationId: string | null = null
+  if (isDestructive(intent)) {
+    const result = await stateManager.startOperationIfNoConflict(intent as Intent, context, { traceId })
     if (!result.started) {
-      finishSpan(span, "error", { code: "CONFLICT", message: "Conflicting operation in progress" })
+      finishSpan(span, "error", { code: "CONFLICT", message: "conflicting operation" })
       return {
         success: false,
         intent,
         operationId: null,
-        error: "Conflicting operation in progress.",
+        traceId,
+        error: "Conflicting operation in progress on this host.",
         guidance: "",
       }
     }
     operationId = result.operationId!
   }
 
-  // 6. Route
-  const routeResult = route(intent, context)
-
-  // 6.5 Handle document: load content and return as guidance
-  if (routeResult.type === "document") {
-    const docGuidance = await loadDocumentGuidance(context)
-    finishSpan(span, docGuidance.startsWith("Error") ? "error" : "ok")
-    return {
-      success: !docGuidance.startsWith("Error"),
-      intent,
-      operationId,
-      error: null,
-      guidance: docGuidance,
-    }
-  }
-
-  if (routeResult.type === "error") {
-    finishSpan(span, "error", { code: "UNKNOWN_INTENT", message: routeResult.message })
-    return { success: false, intent, operationId, error: routeResult.message, guidance: "" }
+  // Build guidance based on intent
+  let guidance: string
+  if (intent === "execute_document") {
+    guidance = await buildDocumentGuidance(context)
+  } else {
+    guidance = buildOperationGuidance(intent, context)
   }
 
   finishSpan(span, "ok")
-  logger.info("Dispatch completed", { traceId, intent, type: routeResult.type })
+  logger.info("Dispatch completed", { traceId, intent, operationId })
 
   return {
     success: true,
     intent,
     operationId,
+    traceId,
     error: null,
-    guidance: formatGuidance(routeResult, intent),
+    guidance,
   }
 }
 
-/**
- * Load document and return as guidance for LLM to execute
- */
-async function loadDocumentGuidance(context: Record<string, unknown>): Promise<string> {
+// ============================================================================
+// Guidance builders
+// ============================================================================
+
+async function buildDocumentGuidance(context: Record<string, unknown>): Promise<string> {
   const docPath = context.path as string | undefined
   const content = context.content as string | undefined
 
   let docContent: string
+  let source: string
+
   if (docPath) {
     try {
       docContent = await fs.promises.readFile(docPath, "utf-8")
+      source = docPath
     } catch (err) {
       return `Error: Failed to read document at ${docPath}: ${err}`
     }
   } else if (content) {
     docContent = content
+    source = "pasted content"
   } else {
-    return "Error: Provide path or content parameter for document execution."
+    return "Error: Provide 'path' or 'content' in context for execute_document."
   }
 
-  return `## Document Loaded\n\n**Source**: ${docPath || "pasted content"}\n**Length**: ${docContent.length} chars\n\n---\n\n${docContent}\n\n---\n\n**Instructions**: Read the document above. Execute each step sequentially using musa_exec/musa_docker. Validate results at each checkpoint.`
+  return buildExecutionContract(docContent, source)
 }
 
-function formatGuidance(r: RouteResult, intent: string): string {
+function buildOperationGuidance(intent: string, context: Record<string, unknown>): string {
   const lines: string[] = []
-  lines.push(`## Dispatch: ${intent}`)
-  lines.push(`**Type**: ${r.type}`)
+  lines.push(`## Operation: ${intent}`)
+  lines.push(`**Status**: started`)
 
-  if (r.skillId) {
-    lines.push(`**Skill**: ${r.skillId}`)
-    if (r.description) lines.push(`**Description**: ${r.description}`)
-    if (r.readPath) lines.push(`**Skill file**: ${r.readPath}`)
-  }
-
-  if (r.target) lines.push(`**Tool**: ${r.target}`)
-
-  if (r.orchestration) {
+  // If there's a matching skill, reference its SKILL.md
+  const skill = getSkillByIntent(intent)
+  const skillPath = skill ? getSkillPath(skill.id) : null
+  if (skillPath) {
+    lines.push(`**Skill reference**: ${skillPath}`)
     lines.push("")
-    lines.push("**Steps**:")
-    r.orchestration.steps.forEach((s, i) => {
-      lines.push(`${i + 1}. ${s.skillId}${s.description ? ` — ${s.description}` : ""}`)
-    })
+    lines.push("Read the skill file above for detailed execution steps.")
   }
 
-  if (r.params && Object.keys(r.params).length > 0) {
+  if (Object.keys(context).length > 0) {
     lines.push("")
-    lines.push("**Params**: " + JSON.stringify(r.params, null, 2))
+    lines.push("**Context**:")
+    for (const [k, v] of Object.entries(context)) {
+      lines.push(`- ${k}: ${v}`)
+    }
   }
-
-  lines.push("")
-  lines.push(r.message)
 
   return lines.join("\n")
+}
+
+// ============================================================================
+// Lifecycle actions
+// ============================================================================
+
+async function handleLifecycleAction(
+  action: string,
+  intent: Intent,
+  context: Record<string, unknown>,
+  traceId: string,
+  stateManager: StateManager,
+): Promise<DispatchResult> {
+  const operationId = context.operationId as string | undefined
+
+  if (action === "status") {
+    if (!operationId) {
+      return { success: false, intent, operationId: null, traceId, error: "operationId required for status", guidance: "" }
+    }
+    const op = await stateManager.getOperation(operationId)
+    if (!op) {
+      return { success: false, intent, operationId, traceId, error: `Operation ${operationId} not found`, guidance: "" }
+    }
+    return {
+      success: true,
+      intent,
+      operationId,
+      traceId,
+      error: null,
+      guidance: `Operation ${operationId}: ${op.execution.status} (${op.intent})`,
+    }
+  }
+
+  if (action === "resume") {
+    if (!operationId) {
+      return { success: false, intent, operationId: null, traceId, error: "operationId required for resume", guidance: "" }
+    }
+    const resumed = await stateManager.resumeOperation(operationId)
+    return {
+      success: resumed,
+      intent,
+      operationId,
+      traceId,
+      error: resumed ? null : `Cannot resume operation ${operationId}`,
+      guidance: resumed ? `Operation ${operationId} resumed.` : "",
+    }
+  }
+
+  if (action === "cancel") {
+    if (!operationId) {
+      return { success: false, intent, operationId: null, traceId, error: "operationId required for cancel", guidance: "" }
+    }
+    await stateManager.completeOperation(operationId, {
+      success: false,
+      summary: "Cancelled by user",
+      error: "User cancelled",
+    })
+    return {
+      success: true,
+      intent,
+      operationId,
+      traceId,
+      error: null,
+      guidance: `Operation ${operationId} cancelled.`,
+    }
+  }
+
+  return { success: false, intent, operationId: null, traceId, error: `Unknown action: ${action}`, guidance: "" }
 }
