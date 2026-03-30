@@ -6,7 +6,7 @@
  */
 
 import type { StateManager, Intent, Operation } from "../core/state-manager.js"
-import { parseIntentWithContext, getIntentDescription } from "./intent-parser.js"
+import { parseIntentWithContext, getIntentDescription, calculateExecuteDocumentScore, SCORE_THRESHOLD } from "./intent-parser.js"
 import { routeToHandler, type RouteResult } from "./router.js"
 import { runPreFlightCheck, type CheckResult } from "./pre-check.js"
 import { checkPermission, type PermissionResult } from "./permission-gate.js"
@@ -202,7 +202,7 @@ const NON_SKILL_INTENT_DESCRIPTIONS: Record<string, string> = {
   validate: "Validate MUSA environment (toolkit, PyTorch MUSA)",
   sync: "Sync files between local and remote hosts",
   run_container: "Run a Docker container with GPU access",
-  execute_document: "Execute deployment plan from document (parse, plan, execute)",
+  execute_document: "【文档驱动】当用户提供部署文档/操作指南时使用。触发词：'按照文档'、'根据文档'、'执行文档步骤'。解析文档并按步骤执行。",
 }
 
 /**
@@ -227,7 +227,12 @@ export function registerDispatcherTool(api: any, stateManager: StateManager): vo
 
 Handles pre-checks, permission gating, routing to skills/tools, error handling, and state management.
 
-Use this as the primary entry point for all MUSA-related operations.
+**重要：当用户提供部署文档时，优先使用 execute_document intent！**
+
+触发场景：
+- 用户说"按照文档部署"、"根据这个文档操作"
+- 用户粘贴了部署步骤文档（Markdown 格式）
+- 用户提供了环境配置指南
 
 **Intents:**
 ${skillDescriptions}
@@ -299,10 +304,33 @@ export async function dispatch(
     return internalDispatch(intent, context, parentOperationId, stateManager)
   }
 
-  // 1. Parse intent (auto mode) with context-aware detection
+  // 1. Parse intent with context-aware detection
+  // IMPORTANT: execute_document scoring applies to ALL intents, not just "auto"
+  // This ensures document-driven execution is detected even when AI passes a specific intent
   let resolvedIntent = intent
-  if (intent === "auto" && query) {
-    resolvedIntent = parseIntentWithContext(query, context)
+
+  // Use query or context.content as scoring input (fallback to empty string)
+  // This ensures scoring works even when AI doesn't pass query parameter
+  const scoringInput = query || ""
+  const hasContent = context?.content && typeof context.content === "string" && context.content.length > 0
+
+  if (scoringInput || hasContent) {
+    // Step 1a: Check if this should be execute_document regardless of AI's choice
+    const docScore = calculateExecuteDocumentScore(scoringInput, context)
+    if (docScore >= SCORE_THRESHOLD) {
+      // Document execution has highest priority - override AI's intent
+      resolvedIntent = "execute_document"
+      const logger = createLogger("dispatcher")
+      logger.info("execute_document override triggered", {
+        originalIntent: intent,
+        score: docScore,
+        threshold: SCORE_THRESHOLD,
+        scoringSource: query ? "query" : "context.content",
+      })
+    } else if (intent === "auto") {
+      // Step 1b: Only parse intent if score doesn't trigger execute_document
+      resolvedIntent = parseIntentWithContext(scoringInput, context)
+    }
   }
 
   // 2. Classify operation risk level (lightweight, no side effects)

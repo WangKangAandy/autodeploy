@@ -369,9 +369,28 @@ function calculateExecuteDocumentScore(
     }
   }
 
-  // Step 2: If no action score, don't count path/content
-  // This is the key change: path alone should NOT trigger execute_document
+  // Step 2: If no action score, check for pure document features
+  // This handles the case where AI passes intent without query but with context.content
+  // IMPORTANT: We only do this when query is empty or has no clear intent
+  // If user says "看一下" or "解释", they want to view/explain, not execute
   if (actionScore === 0) {
+    // Only trigger on pure document when query is empty (AI didn't pass query)
+    // OR when query doesn't contain explicit non-execution words
+    const nonExecutionWords = ["看一下", "解释", "查看", "说明", "介绍", "什么是", "explain", "describe"]
+    const hasNonExecutionIntent = nonExecutionWords.some(w => query.includes(w))
+
+    if (!hasNonExecutionIntent && context?.content && typeof context.content === "string") {
+      const content = context.content
+      // Detect Markdown document features (headings or code fences)
+      const hasMarkdownFeatures = /^#{1,6}\s+/m.test(content) || /^```/m.test(content)
+      // Detect deployment-related keywords
+      const hasDeploymentKeywords = /驱动|driver|镜像|image|容器|container|torchrun|部署|docker|musa/i.test(content)
+
+      if (hasMarkdownFeatures && hasDeploymentKeywords) {
+        // Pure document detected - return threshold to trigger execute_document
+        return SCORE_THRESHOLD
+      }
+    }
     return 0
   }
 
@@ -542,3 +561,20 @@ export function getIntentSkillPath(intent: Intent): string | null {
   }
   return null
 }
+
+// =============================================================================
+// Exports for dispatcher override
+// =============================================================================
+
+/**
+ * Score threshold for execute_document detection
+ */
+export { SCORE_THRESHOLD }
+
+/**
+ * Calculate execute_document score
+ *
+ * Used by dispatcher to detect document-driven execution intent
+ * regardless of what intent AI passes.
+ */
+export { calculateExecuteDocumentScore }

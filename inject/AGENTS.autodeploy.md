@@ -23,6 +23,7 @@ When user requests involve GPU, MUSA, model/dataset download, or remote operatio
 
 | User Intent | Dispatch Call |
 |-------------|---------------|
+| 按文档部署 | `musa_dispatch(intent="execute_document", context={path: "..."})` |
 | 部署 MUSA 环境 / deploy MUSA | `musa_dispatch(intent="deploy_env")` |
 | 更新 GPU 驱动 / update driver | `musa_dispatch(intent="update_driver")` |
 | GPU 状态检查 | `musa_dispatch(intent="gpu_status")` |
