@@ -8,14 +8,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
-    "install-plugin": "node scripts/install.js install",
-    "uninstall-plugin": "node scripts/install.js uninstall"
+    "install-plugin": "node install.js install",
+    "uninstall-plugin": "node install.js uninstall"
   },
   "files": [
     "dist/**/*",
     "openclaw.plugin.json",
     "src/**/*",
-    "scripts/**/*",
+    "install.js",
     "AGENTS.autodeploy.md",
     "skills/**/*",
     "references/**/*"
@@ -49,6 +49,6 @@
     "extensions": [
       "./dist/index.js"
     ],
-    "installHook": "./scripts/install.js"
+    "installHook": "./install.js"
   }
 }

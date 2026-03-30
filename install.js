@@ -6,8 +6,8 @@
  * Delegates merge logic to src/utils/inject-manager.js.
  *
  * Usage:
- *   node scripts/install.js install [workspace-path]
- *   node scripts/install.js uninstall [workspace-path] [--keep-state]
+ *   node install.js install [workspace-path]
+ *   node install.js uninstall [workspace-path] [--keep-state]
  */
 
 const fs = require("fs");
