@@ -88,6 +88,60 @@ const registry: RegistryState = {
 }
 
 /**
+ * Reset registry state (for testing only)
+ *
+ * Clears all loaded skills and resets the loaded flag.
+ * This allows tests to re-load the registry with different mock data.
+ *
+ * @internal
+ */
+export function resetRegistry(): void {
+  registry.skills.clear()
+  registry.intentToSkill.clear()
+  registry.loaded = false
+}
+
+/**
+ * Load skills from parsed YAML data (for testing/internal use)
+ *
+ * Bypasses file loading and directly populates the registry.
+ * Used for testing with mock data.
+ *
+ * @internal
+ */
+export function loadRegistryFromData(data: IndexYaml): void {
+  resetRegistry()
+
+  if (data.skills) {
+    for (const rawSkill of data.skills) {
+      const skill = normalizeSkill(rawSkill)
+      registry.skills.set(skill.id, skill)
+
+      if (skill.dispatchIntent) {
+        if (!VALID_INTENTS.includes(skill.dispatchIntent as Intent)) {
+          console.warn(
+            `[skill-registry] Unknown dispatch_intent "${skill.dispatchIntent}" in skill "${skill.id}". ` +
+            `Valid intents: ${VALID_INTENTS.join(", ")}`
+          )
+        }
+
+        if (registry.intentToSkill.has(skill.dispatchIntent)) {
+          const existingSkillId = registry.intentToSkill.get(skill.dispatchIntent)
+          throw new Error(
+            `Duplicate dispatch_intent "${skill.dispatchIntent}" in skills "${existingSkillId}" and "${skill.id}". ` +
+            `Each intent must map to exactly one skill.`
+          )
+        }
+
+        registry.intentToSkill.set(skill.dispatchIntent, skill.id)
+      }
+    }
+  }
+
+  registry.loaded = true
+}
+
+/**
  * Get the path to skills/index.yml
  */
 function getIndexPath(): string {

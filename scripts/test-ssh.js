@@ -46,23 +46,10 @@ conn
     process.exit(1);
   });
 
-// Try keyboard-interactive auth as fallback
 conn.connect({
   host: config.host,
   port: config.port,
   username: config.username,
   password: config.password,
   readyTimeout: 30000,
-  tryKeyboard: true,
-  authHandler: (methodsLeft, partialSuccess, callback) => {
-    console.log("Auth methods left:", methodsLeft);
-    console.log("Partial success:", partialSuccess);
-    if (partialSuccess) {
-      // Already partially authenticated, just need more
-      callback({ type: "password", password: config.password });
-    } else {
-      // First attempt
-      callback({ type: "password", password: config.password });
-    }
-  },
 });

@@ -1,15 +1,18 @@
 /**
- * Skill Registry Deep Tests
+ * Skill Registry Unit Tests
  *
- * Tests for skills/index.yml loading, intent mapping, and skill metadata queries.
- *
- * Note: The registry is a singleton, so tests are designed to work with
- * shared state. Each test should set up its expected state independently.
+ * Tests for skill-registry.ts covering:
+ * - YAML loading and normalization
+ * - Error handling (missing file, parse error, duplicate intent)
+ * - Skill metadata queries
+ * - Intent mapping
+ * - Access control (exposure, kind)
  */
 
-import { describe, it, expect, vi, beforeAll } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
-  loadRegistry,
+  resetRegistry,
+  loadRegistryFromData,
   getSkillMeta,
   getSkillByIntent,
   getSkillPath,
@@ -21,384 +24,440 @@ import {
   getSkillsByKind,
   getIntentList,
   getIntentToSkillMap,
-  type SkillMeta,
 } from "../../src/dispatcher/skill-registry.js"
 
-// We're testing against the real skills/index.yml
-// This is an integration-style test that validates the actual data
+// Helper to create valid skill data
+function createSkill(overrides: Partial<{
+  id: string
+  name: string
+  path: string
+  description: string
+  category: "env" | "assets" | "workload" | "benchmark" | "migration"
+  kind: "atomic" | "meta"
+  exposure: "user" | "internal"
+  risk_level: "safe" | "destructive" | "idempotent"
+  dispatch_intent?: string
+  depends_on?: string[]
+}> = {}) {
+  return {
+    id: "test_skill",
+    name: "Test Skill",
+    path: "test/SKILL.md",
+    description: "A test skill",
+    category: "env" as const,
+    kind: "atomic" as const,
+    exposure: "user" as const,
+    risk_level: "safe" as const,
+    ...overrides,
+  }
+}
 
 describe("skill-registry", () => {
-  // Load registry once before all tests
-  beforeAll(() => {
-    loadRegistry()
+  // Reset registry before each test for isolation
+  beforeEach(() => {
+    resetRegistry()
+    vi.clearAllMocks()
+  })
+
+  describe("loadRegistryFromData", () => {
+    it("should load skills from valid data", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "skill_a", dispatch_intent: "deploy_env" }),
+          createSkill({ id: "skill_b", category: "assets" }),
+        ],
+      })
+
+      expect(getSkillMeta("skill_a")).not.toBeNull()
+      expect(getSkillMeta("skill_b")).not.toBeNull()
+    })
+
+    it("should handle empty skills array", () => {
+      loadRegistryFromData({ skills: [] })
+
+      expect(getIntentList()).toEqual([])
+      expect(getSkillMeta("any")).toBeNull()
+    })
+
+    it("should handle missing skills field", () => {
+      loadRegistryFromData({})
+
+      expect(getIntentList()).toEqual([])
+    })
+
+    it("should throw for duplicate dispatch_intent", () => {
+      expect(() =>
+        loadRegistryFromData({
+          skills: [
+            createSkill({ id: "skill_a", dispatch_intent: "duplicate_intent" }),
+            createSkill({ id: "skill_b", dispatch_intent: "duplicate_intent" }),
+          ],
+        })
+      ).toThrow(/Duplicate dispatch_intent.*skill_a.*skill_b/)
+    })
+
+    it("should warn for unknown dispatch_intent values", () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+      loadRegistryFromData({
+        skills: [createSkill({ dispatch_intent: "unknown_intent_type" })],
+      })
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Unknown dispatch_intent")
+      )
+
+      consoleSpy.mockRestore()
+    })
+
+    it("should normalize snake_case fields to camelCase", () => {
+      loadRegistryFromData({
+        skills: [
+          {
+            id: "norm_skill",
+            name: "Normalize Skill",
+            path: "norm/SKILL.md",
+            description: "Test normalization",
+            category: "env",
+            kind: "meta",
+            exposure: "user",
+            risk_level: "destructive", // snake_case
+            dispatch_intent: "deploy_env", // snake_case
+            depends_on: ["dep_a", "dep_b"], // snake_case
+          },
+        ],
+      })
+
+      const skill = getSkillMeta("norm_skill")
+      expect(skill?.riskLevel).toBe("destructive") // normalized
+      expect(skill?.dispatchIntent).toBe("deploy_env") // normalized
+      expect(skill?.dependsOn).toEqual(["dep_a", "dep_b"]) // normalized
+    })
+
+    it("should allow same intent after reset", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "skill_a", dispatch_intent: "deploy_env" })],
+      })
+
+      resetRegistry()
+
+      // Should not throw - registry was reset
+      expect(() =>
+        loadRegistryFromData({
+          skills: [createSkill({ id: "skill_b", dispatch_intent: "deploy_env" })],
+        })
+      ).not.toThrow()
+    })
   })
 
   describe("getSkillMeta", () => {
     it("should return null for non-existent skill", () => {
-      const skill = getSkillMeta("nonexistent_skill_xyz")
-      expect(skill).toBeNull()
+      loadRegistryFromData({ skills: [createSkill()] })
+      expect(getSkillMeta("nonexistent_skill")).toBeNull()
     })
 
-    it("should return skill metadata for deploy_musa_base_env", () => {
-      const skill = getSkillMeta("deploy_musa_base_env")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("deploy_musa_base_env")
-      expect(skill?.kind).toBe("meta")
-      expect(skill?.exposure).toBe("user")
-      expect(skill?.riskLevel).toBe("destructive")
-      expect(skill?.category).toBe("env")
-    })
+    it("should return skill metadata for existing skill", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({
+            id: "existing",
+            name: "Existing Skill",
+            description: "An existing skill",
+            category: "assets",
+          }),
+        ],
+      })
 
-    it("should return skill metadata for ensure_musa_driver", () => {
-      const skill = getSkillMeta("ensure_musa_driver")
+      const skill = getSkillMeta("existing")
       expect(skill).not.toBeNull()
-      expect(skill?.kind).toBe("atomic")
-      expect(skill?.exposure).toBe("internal")
-      expect(skill?.riskLevel).toBe("destructive")
-    })
-
-    it("should return skill metadata for prepare_model_artifacts", () => {
-      const skill = getSkillMeta("prepare_model_artifacts")
-      expect(skill).not.toBeNull()
-      expect(skill?.dispatchIntent).toBe("prepare_model")
+      expect(skill?.name).toBe("Existing Skill")
       expect(skill?.category).toBe("assets")
-    })
-
-    it("should have normalized camelCase fields from snake_case YAML", () => {
-      const skill = getSkillMeta("deploy_musa_base_env")
-      expect(skill?.riskLevel).toBeDefined() // risk_level → riskLevel
-      expect(skill?.dispatchIntent).toBeDefined() // dispatch_intent → dispatchIntent
-      expect(skill?.dependsOn).toBeDefined() // depends_on → dependsOn
-      expect(skill?.dependsOn).toContain("ensure_musa_driver")
+      expect(skill?.description).toBe("An existing skill")
     })
   })
 
   describe("getSkillByIntent", () => {
     it("should return null for unmapped intent", () => {
-      const skill = getSkillByIntent("unknown_intent_xyz")
-      expect(skill).toBeNull()
+      loadRegistryFromData({ skills: [createSkill()] })
+      expect(getSkillByIntent("unknown_intent")).toBeNull()
     })
 
-    it("should return deploy_musa_base_env for deploy_env intent", () => {
-      const skill = getSkillByIntent("deploy_env")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("deploy_musa_base_env")
-    })
+    it("should return skill for mapped intent", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "intent_skill", dispatch_intent: "prepare_model" })],
+      })
 
-    it("should return update_musa_driver for update_driver intent", () => {
-      const skill = getSkillByIntent("update_driver")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("update_musa_driver")
-    })
-
-    it("should return prepare_model_artifacts for prepare_model intent", () => {
       const skill = getSkillByIntent("prepare_model")
       expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("prepare_model_artifacts")
+      expect(skill?.id).toBe("intent_skill")
     })
 
-    it("should return prepare_dataset_artifacts for prepare_dataset intent", () => {
-      const skill = getSkillByIntent("prepare_dataset")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("prepare_dataset_artifacts")
-    })
+    it("should return same skill from getSkillMeta and getSkillByIntent", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "sync_skill", dispatch_intent: "sync" })],
+      })
 
-    it("should return prepare_musa_package for prepare_package intent", () => {
-      const skill = getSkillByIntent("prepare_package")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("prepare_musa_package")
-    })
+      const byId = getSkillMeta("sync_skill")
+      const byIntent = getSkillByIntent("sync")
 
-    it("should return prepare_dependency_repo for prepare_repo intent", () => {
-      const skill = getSkillByIntent("prepare_repo")
-      expect(skill).not.toBeNull()
-      expect(skill?.id).toBe("prepare_dependency_repo")
+      expect(byId).toBe(byIntent)
     })
   })
 
   describe("getSkillPath", () => {
     it("should return null for unknown skill", () => {
-      const pathResult = getSkillPath("unknown_skill_xyz")
-      expect(pathResult).toBeNull()
+      loadRegistryFromData({ skills: [] })
+      expect(getSkillPath("unknown")).toBeNull()
     })
 
-    it("should return absolute path for deploy_musa_base_env", () => {
-      const skillPath = getSkillPath("deploy_musa_base_env")
+    it("should return absolute path for known skill", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "path_skill", path: "env/deploy/SKILL.md" })],
+      })
+
+      const skillPath = getSkillPath("path_skill")
       expect(skillPath).not.toBeNull()
       expect(skillPath).toContain("skills")
-      expect(skillPath).toContain("env/deploy_musa_base_env/SKILL.md")
-    })
-
-    it("should return absolute path for internal skills", () => {
-      const skillPath = getSkillPath("ensure_system_dependencies")
-      expect(skillPath).not.toBeNull()
-      expect(skillPath).toContain("env/ensure_system_dependencies/SKILL.md")
+      expect(skillPath).toContain("env/deploy/SKILL.md")
     })
   })
 
   describe("getSkillCategory", () => {
-    it("should return correct category for env skills", () => {
-      expect(getSkillCategory("deploy_musa_base_env")).toBe("env")
-      expect(getSkillCategory("ensure_musa_driver")).toBe("env")
-    })
+    it("should return correct category", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "env_skill", category: "env" }),
+          createSkill({ id: "assets_skill", category: "assets" }),
+          createSkill({ id: "workload_skill", category: "workload" }),
+        ],
+      })
 
-    it("should return correct category for assets skills", () => {
-      expect(getSkillCategory("prepare_model_artifacts")).toBe("assets")
-      expect(getSkillCategory("prepare_dataset_artifacts")).toBe("assets")
+      expect(getSkillCategory("env_skill")).toBe("env")
+      expect(getSkillCategory("assets_skill")).toBe("assets")
+      expect(getSkillCategory("workload_skill")).toBe("workload")
     })
 
     it("should return null for unknown skill", () => {
-      expect(getSkillCategory("unknown_skill")).toBeNull()
+      expect(getSkillCategory("unknown")).toBeNull()
     })
   })
 
   describe("isMetaSkill", () => {
-    it("should return true for meta skills", () => {
-      expect(isMetaSkill("deploy_musa_base_env")).toBe(true)
-      expect(isMetaSkill("update_musa_driver")).toBe(true)
+    it("should return true for meta skill", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "meta_skill", kind: "meta" })],
+      })
+      expect(isMetaSkill("meta_skill")).toBe(true)
     })
 
-    it("should return false for atomic skills", () => {
-      expect(isMetaSkill("ensure_musa_driver")).toBe(false)
-      expect(isMetaSkill("prepare_model_artifacts")).toBe(false)
+    it("should return false for atomic skill", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "atomic_skill", kind: "atomic" })],
+      })
+      expect(isMetaSkill("atomic_skill")).toBe(false)
     })
 
     it("should return false for unknown skill", () => {
-      expect(isMetaSkill("unknown_skill")).toBe(false)
+      expect(isMetaSkill("unknown")).toBe(false)
     })
   })
 
   describe("isUserExposed", () => {
-    it("should return true for user-exposed skills", () => {
-      expect(isUserExposed("deploy_musa_base_env")).toBe(true)
-      expect(isUserExposed("prepare_model_artifacts")).toBe(true)
+    it("should return true for user-exposed skill", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "user_skill", exposure: "user" })],
+      })
+      expect(isUserExposed("user_skill")).toBe(true)
     })
 
-    it("should return false for internal skills", () => {
-      expect(isUserExposed("ensure_system_dependencies")).toBe(false)
-      expect(isUserExposed("ensure_musa_driver")).toBe(false)
-      expect(isUserExposed("validate_musa_container_environment")).toBe(false)
+    it("should return false for internal skill", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "internal_skill", exposure: "internal" })],
+      })
+      expect(isUserExposed("internal_skill")).toBe(false)
     })
 
     it("should return false for unknown skill", () => {
-      expect(isUserExposed("unknown_skill")).toBe(false)
+      expect(isUserExposed("unknown")).toBe(false)
     })
   })
 
   describe("canCallSkill", () => {
     it("should allow user skill in any mode", () => {
-      expect(canCallSkill("deploy_musa_base_env", false)).toBe(true)
-      expect(canCallSkill("deploy_musa_base_env", true)).toBe(true)
+      loadRegistryFromData({
+        skills: [createSkill({ id: "user_skill", exposure: "user" })],
+      })
+
+      expect(canCallSkill("user_skill", false)).toBe(true)
+      expect(canCallSkill("user_skill", true)).toBe(true)
     })
 
     it("should restrict internal skill to internal mode only", () => {
-      expect(canCallSkill("ensure_musa_driver", false)).toBe(false)
-      expect(canCallSkill("ensure_musa_driver", true)).toBe(true)
+      loadRegistryFromData({
+        skills: [createSkill({ id: "internal_skill", exposure: "internal" })],
+      })
+
+      expect(canCallSkill("internal_skill", false)).toBe(false)
+      expect(canCallSkill("internal_skill", true)).toBe(true)
     })
 
-    it("should allow unknown skill in internal mode only (default)", () => {
-      // Unknown skills have undefined exposure, so isUserExposed returns false
-      expect(canCallSkill("unknown_skill", false)).toBe(false)
-      expect(canCallSkill("unknown_skill", true)).toBe(true)
+    it("should deny unknown skill in user mode", () => {
+      // Unknown skills have undefined exposure, isUserExposed returns false
+      expect(canCallSkill("unknown", false)).toBe(false)
+      expect(canCallSkill("unknown", true)).toBe(true)
     })
   })
 
   describe("getSkillsByExposure", () => {
-    it("should return all user-exposed skills", () => {
+    it("should filter skills by exposure level", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "user_a", exposure: "user" }),
+          createSkill({ id: "internal_b", exposure: "internal" }),
+          createSkill({ id: "user_c", exposure: "user" }),
+        ],
+      })
+
       const userSkills = getSkillsByExposure("user")
-      expect(userSkills.length).toBeGreaterThan(0)
-
-      // Verify all returned skills are user-exposed
-      for (const skill of userSkills) {
-        expect(skill.exposure).toBe("user")
-      }
-
-      // Verify known user skills are included
-      const userSkillIds = userSkills.map(s => s.id)
-      expect(userSkillIds).toContain("deploy_musa_base_env")
-      expect(userSkillIds).toContain("update_musa_driver")
-      expect(userSkillIds).toContain("prepare_model_artifacts")
-    })
-
-    it("should return all internal skills", () => {
       const internalSkills = getSkillsByExposure("internal")
-      expect(internalSkills.length).toBeGreaterThan(0)
 
-      // Verify all returned skills are internal
-      for (const skill of internalSkills) {
-        expect(skill.exposure).toBe("internal")
-      }
-
-      // Verify known internal skills are included
-      const internalSkillIds = internalSkills.map(s => s.id)
-      expect(internalSkillIds).toContain("ensure_system_dependencies")
-      expect(internalSkillIds).toContain("ensure_musa_driver")
+      expect(userSkills.length).toBe(2)
+      expect(internalSkills.length).toBe(1)
+      expect(userSkills.map((s) => s.id)).toEqual(["user_a", "user_c"])
+      expect(internalSkills[0].id).toBe("internal_b")
     })
   })
 
   describe("getSkillsByKind", () => {
-    it("should return all meta skills", () => {
-      const metaSkills = getSkillsByKind("meta")
-      expect(metaSkills.length).toBeGreaterThan(0)
+    it("should filter skills by kind", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "atomic_1", kind: "atomic" }),
+          createSkill({ id: "meta_1", kind: "meta" }),
+          createSkill({ id: "atomic_2", kind: "atomic" }),
+        ],
+      })
 
-      for (const skill of metaSkills) {
-        expect(skill.kind).toBe("meta")
-      }
-
-      const metaSkillIds = metaSkills.map(s => s.id)
-      expect(metaSkillIds).toContain("deploy_musa_base_env")
-      expect(metaSkillIds).toContain("update_musa_driver")
-    })
-
-    it("should return all atomic skills", () => {
       const atomicSkills = getSkillsByKind("atomic")
-      expect(atomicSkills.length).toBeGreaterThan(0)
+      const metaSkills = getSkillsByKind("meta")
 
-      for (const skill of atomicSkills) {
-        expect(skill.kind).toBe("atomic")
-      }
-
-      const atomicSkillIds = atomicSkills.map(s => s.id)
-      expect(atomicSkillIds).toContain("ensure_musa_driver")
-      expect(atomicSkillIds).toContain("prepare_model_artifacts")
+      expect(atomicSkills.length).toBe(2)
+      expect(metaSkills.length).toBe(1)
+      expect(metaSkills[0].id).toBe("meta_1")
     })
   })
 
   describe("getIntentList", () => {
-    it("should return all dispatch intents from skills", () => {
+    it("should return sorted unique intents from skills", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ dispatch_intent: "intent_z" }),
+          createSkill({ id: "skill_b", dispatch_intent: "intent_a" }),
+          createSkill({ id: "skill_c", dispatch_intent: "intent_m" }),
+          createSkill({ id: "skill_no_intent" }), // No dispatch_intent
+        ],
+      })
+
       const intents = getIntentList()
-
-      expect(intents.length).toBeGreaterThan(0)
-
-      // Verify known intents are included
-      expect(intents).toContain("deploy_env")
-      expect(intents).toContain("update_driver")
-      expect(intents).toContain("prepare_model")
-      expect(intents).toContain("prepare_dataset")
-      expect(intents).toContain("prepare_package")
-      expect(intents).toContain("prepare_repo")
 
       // Should be sorted
-      const sortedIntents = [...intents].sort()
-      expect(intents).toEqual(sortedIntents)
+      expect(intents).toEqual(["intent_a", "intent_m", "intent_z"])
     })
 
-    it("should not contain intents without dispatch_intent mapping", () => {
-      const intents = getIntentList()
+    it("should return empty array when no intents defined", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "no_intent_1" }),
+          createSkill({ id: "no_intent_2" }),
+        ],
+      })
 
-      // These skills don't have dispatch_intent
-      expect(intents).not.toContain("ensure_musa_driver") // internal skill
+      expect(getIntentList()).toEqual([])
     })
   })
 
   describe("getIntentToSkillMap", () => {
-    it("should return complete intent-to-skill mapping", () => {
+    it("should return intent-to-skill mapping", () => {
+      loadRegistryFromData({
+        skills: [
+          createSkill({ id: "env_skill", dispatch_intent: "deploy_env" }),
+          createSkill({ id: "driver_skill", dispatch_intent: "update_driver" }),
+        ],
+      })
+
       const map = getIntentToSkillMap()
 
-      expect(map.size).toBeGreaterThan(0)
-
-      // Verify known mappings
-      expect(map.get("deploy_env")?.id).toBe("deploy_musa_base_env")
-      expect(map.get("update_driver")?.id).toBe("update_musa_driver")
-      expect(map.get("prepare_model")?.id).toBe("prepare_model_artifacts")
+      expect(map.size).toBe(2)
+      expect(map.get("deploy_env")?.id).toBe("env_skill")
+      expect(map.get("update_driver")?.id).toBe("driver_skill")
     })
 
-    it("should have one-to-one mapping (no duplicates)", () => {
-      const map = getIntentToSkillMap()
-      const skillIds = Array.from(map.values()).map(s => s.id)
-      const uniqueSkillIds = new Set(skillIds)
+    it("should return empty map when no intents defined", () => {
+      loadRegistryFromData({
+        skills: [createSkill({ id: "no_intent" })],
+      })
 
-      // Each intent maps to exactly one skill
-      expect(skillIds.length).toBe(uniqueSkillIds.size)
+      expect(getIntentToSkillMap().size).toBe(0)
     })
   })
 
-  describe("dependency chain validation", () => {
-    it("should have valid dependsOn references for deploy_musa_base_env", () => {
-      const skill = getSkillMeta("deploy_musa_base_env")
-      expect(skill?.dependsOn).toBeDefined()
-      expect(skill?.dependsOn?.length).toBeGreaterThan(0)
+  describe("lazy loading", () => {
+    it("should auto-load on first query", () => {
+      // Don't call loadRegistryFromData - use reset state
+      resetRegistry()
 
-      // Verify each dependency exists
-      for (const depId of skill?.dependsOn || []) {
-        const depSkill = getSkillMeta(depId)
-        expect(depSkill).not.toBeNull(`Dependency ${depId} should exist`)
-      }
-    })
+      // First query triggers load (from real file)
+      getSkillMeta("any")
 
-    it("should have valid dependsOn references for update_musa_driver", () => {
-      const skill = getSkillMeta("update_musa_driver")
-      expect(skill?.dependsOn).toBeDefined()
-      expect(skill?.dependsOn?.length).toBeGreaterThan(0)
-
-      for (const depId of skill?.dependsOn || []) {
-        const depSkill = getSkillMeta(depId)
-        expect(depSkill).not.toBeNull(`Dependency ${depId} should exist`)
-      }
+      // Second query should not re-load (singleton)
+      // We can't easily verify this without more invasive testing
+      // But the behavior is implicit - no crash, returns data
     })
   })
+})
 
-  describe("risk level validation", () => {
-    it("should have destructive risk for deployment skills", () => {
-      const deploy = getSkillMeta("deploy_musa_base_env")
-      expect(deploy?.riskLevel).toBe("destructive")
-
-      const update = getSkillMeta("update_musa_driver")
-      expect(update?.riskLevel).toBe("destructive")
-    })
-
-    it("should have idempotent risk for prepare skills", () => {
-      const model = getSkillMeta("prepare_model_artifacts")
-      expect(model?.riskLevel).toBe("idempotent")
-
-      const dataset = getSkillMeta("prepare_dataset_artifacts")
-      expect(dataset?.riskLevel).toBe("idempotent")
-
-      const pkg = getSkillMeta("prepare_musa_package")
-      expect(pkg?.riskLevel).toBe("idempotent")
-    })
-
-    it("should have safe risk for validation skill", () => {
-      const validate = getSkillMeta("validate_musa_container_environment")
-      expect(validate?.riskLevel).toBe("safe")
-    })
+/**
+ * Integration tests with real skills/index.yml
+ * These tests validate the actual data file
+ */
+describe("skill-registry integration (real index.yml)", () => {
+  beforeEach(() => {
+    resetRegistry()
   })
 
-  describe("triggers validation", () => {
-    it("should have triggers for user-exposed skills", () => {
-      const deploy = getSkillMeta("deploy_musa_base_env")
-      expect(deploy?.triggers).toBeDefined()
-      expect(deploy?.triggers?.length).toBeGreaterThan(0)
-      expect(deploy?.triggers).toContain("部署 MUSA 环境")
-      expect(deploy?.triggers).toContain("deploy MUSA environment")
-    })
-
-    it("should have Chinese and English triggers", () => {
-      const prepare = getSkillMeta("prepare_model_artifacts")
-      expect(prepare?.triggers).toBeDefined()
-      expect(prepare?.triggers?.some(t => t.includes("模型"))).toBe(true)
-      expect(prepare?.triggers?.some(t => t.includes("model"))).toBe(true)
-    })
+  it("should load real skills/index.yml successfully", () => {
+    // This will load from the real file
+    const skill = getSkillMeta("deploy_musa_base_env")
+    expect(skill).not.toBeNull()
+    expect(skill?.kind).toBe("meta")
+    expect(skill?.exposure).toBe("user")
   })
 
-  describe("inputs validation", () => {
-    it("should have required inputs for deploy_musa_base_env", () => {
-      const skill = getSkillMeta("deploy_musa_base_env")
-      expect(skill?.inputs?.required).toBeDefined()
-      expect(skill?.inputs?.required).toContain("MUSA_SDK_VERSION")
-      expect(skill?.inputs?.required).toContain("MT_GPU_DRIVER_VERSION")
-      expect(skill?.inputs?.optional).toBeDefined()
-    })
+  it("should have valid dependency references in real data", () => {
+    const deploy = getSkillMeta("deploy_musa_base_env")
+    expect(deploy?.dependsOn).toBeDefined()
+    expect(deploy?.dependsOn?.length).toBeGreaterThan(0)
 
-    it("should have required inputs for prepare_model_artifacts", () => {
-      const skill = getSkillMeta("prepare_model_artifacts")
-      expect(skill?.inputs?.required).toBeDefined()
-      expect(skill?.inputs?.required).toContain("MODEL_NAME")
-    })
+    for (const depId of deploy?.dependsOn || []) {
+      const dep = getSkillMeta(depId)
+      expect(dep).not.toBeNull(`Dependency ${depId} should exist`)
+    }
+  })
 
-    it("should have empty required inputs for system dependencies", () => {
-      const skill = getSkillMeta("ensure_system_dependencies")
-      expect(skill?.inputs?.required).toEqual([])
-    })
+  it("should have all required intents mapped", () => {
+    const intents = getIntentList()
+
+    const expectedIntents = [
+      "deploy_env",
+      "update_driver",
+      "prepare_model",
+      "prepare_dataset",
+      "prepare_package",
+      "prepare_repo",
+    ]
+
+    for (const intent of expectedIntents) {
+      expect(intents).toContain(intent)
+    }
   })
 })

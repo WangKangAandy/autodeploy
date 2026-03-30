@@ -7,14 +7,26 @@ import type { ExecResult, ExecOptions, DockerExecArgs } from "./local-exec"
 export interface SSHConfig {
   host: string
   user: string
+  username?: string   // alias for user (ssh2 compat)
   password: string
   port: number | string
   sudoPasswd?: string
 }
 
+/**
+ * Resolve username from SSHConfig, accepting both `user` and `username` fields.
+ * Throws if neither is provided.
+ */
+function resolveUser(config: SSHConfig): string {
+  const u = config.user || config.username
+  if (!u) throw new Error("SSHConfig requires 'user' (or 'username') field")
+  return u
+}
+
 export async function executeSSHCommand(config: SSHConfig, command: string, timeout = 120): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    const { host, user, password, port } = config
+    const { host, password, port } = config
+    const user = resolveUser(config)
     let stdout = ""
     let stderr = ""
     let commandExecuted = false
@@ -125,10 +137,11 @@ export async function syncFiles(config: SSHConfig, args: SyncArgs): Promise<Exec
   if (args.delete) rsyncCmd += " --delete"
   rsyncCmd += ` -e "ssh -p ${config.port} -o StrictHostKeyChecking=no -o ConnectTimeout=10"`
 
+  const rsyncUser = resolveUser(config)
   if (direction === "push") {
-    rsyncCmd += ` '${args.localPath}' ${config.user}@${config.host}:'${args.remotePath}'`
+    rsyncCmd += ` '${args.localPath}' ${rsyncUser}@${config.host}:'${args.remotePath}'`
   } else {
-    rsyncCmd += ` ${config.user}@${config.host}:'${args.remotePath}' '${args.localPath}'`
+    rsyncCmd += ` ${rsyncUser}@${config.host}:'${args.remotePath}' '${args.localPath}'`
   }
 
   return new Promise((resolve) => {
