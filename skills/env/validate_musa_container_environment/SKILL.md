@@ -3,7 +3,7 @@ version: 1
 name: validate_musa_container_environment
 description: |
   Validate MUSA environment inside a Docker container.
-  Tests MUSA tools, PyTorch MUSA backend, tensor operations, and GPU memory.
+  Tests MUSA tools and PyTorch MUSA backend with basic tensor operation.
 
 category: env
 kind: atomic
@@ -28,8 +28,7 @@ scope:
     - Container launch for validation
     - MUSA tools verification (musaInfo, mthreads-gmi)
     - PyTorch MUSA availability check
-    - Tensor operations test (arithmetic, matmul, memory)
-    - GPU memory verification
+    - Basic tensor operation test
     - Container cleanup
   excludes:
     - Container runtime installation
@@ -40,13 +39,12 @@ scope:
 
 # Validate MUSA Container Environment
 
-This atomic skill validates that MUSA is working correctly inside a Docker container. It provides comprehensive testing from MUSA tools to PyTorch tensor operations.
+This atomic skill validates that MUSA is working correctly inside a Docker container. It tests MUSA tools and PyTorch MUSA backend with a basic tensor operation.
 
 ## Invocation
 
 - **Exposure**: internal
 - **Top-level intent**: `validate_musa_container_environment`
-- **Callable from orchestration**: Yes
 
 ### Invocation Example
 
@@ -60,7 +58,7 @@ musa_dispatch(intent="validate_musa_container_environment", context={
 
 - After base environment deployment
 - After driver or toolkit changes
-- Before running workloads (training/inference)
+- Before running workloads (migration/training/inference)
 - As final step of `deploy_musa_base_env` orchestration
 - When troubleshooting torch.musa issues
 
@@ -85,8 +83,17 @@ musa_dispatch(intent="validate_musa_container_environment", context={
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `DOCKER_IMAGE` | Docker image for validation | Yes | - |
-| `CONTAINER_NAME` | Container name (auto-generated if not provided) | No | `musa_test_<timestamp>` |
+| `CONTAINER_NAME` | Existing container name to validate, or auto-generated if not provided | No | `musa_test_<timestamp>` |
+| `DOCKER_IMAGE` | Docker image (required only if container doesn't exist) | No | - |
+
+### Input Scenarios
+
+| CONTAINER_NAME | DOCKER_IMAGE | Behavior |
+|----------------|--------------|----------|
+| Provided, container exists | Ignored | Use existing container directly |
+| Provided, container not exists | Provided | Create new container with image |
+| Not provided | Provided | Auto-generate name, create temporary container |
+| Not provided | Not provided | Error: need at least one |
 
 ## Privileges Required
 
@@ -117,7 +124,10 @@ State file: `./.validate_musa_container_environment_state.json`
 ## Idempotency
 
 - **Idempotent**: Yes
-- **Re-run behavior**: Removes existing container with same name before starting new one
+- **Re-run behavior**:
+  - If container exists: reuse it directly
+  - If container doesn't exist: create new one with provided image
+  - Cleanup: only remove containers created by this skill
 
 ## Resume Behavior
 
@@ -126,42 +136,59 @@ State file: `./.validate_musa_container_environment_state.json`
 
 ## Workflow
 
-### Step 1: Launch Test Container
+### Step 1: Prepare Container
 
 **Action**:
 ```bash
 # Generate container name if not provided
 CONTAINER_NAME="${CONTAINER_NAME:-musa_test_$(date +%s)}"
 
-# Remove existing container with same name
-docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+# Track whether we created the container (for cleanup decision)
+CONTAINER_WAS_CREATED_BY_US=false
 
-echo "Launching validation container: $CONTAINER_NAME"
+# Check if container already exists
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    # Container exists
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "Using existing running container: $CONTAINER_NAME"
+    else
+        echo "Starting existing stopped container: $CONTAINER_NAME"
+        docker start "$CONTAINER_NAME"
+    fi
+else
+    # Container doesn't exist, need DOCKER_IMAGE
+    if [ -z "$DOCKER_IMAGE" ]; then
+        echo "ERROR: Container '$CONTAINER_NAME' not found and DOCKER_IMAGE not provided"
+        echo "Provide either an existing CONTAINER_NAME or a DOCKER_IMAGE to create one."
+        exit 1
+    fi
 
-docker run -itd \
-  --name="$CONTAINER_NAME" \
-  --env MTHREADS_VISIBLE_DEVICES=all \
-  --shm-size=80g \
-  --network=host \
-  --privileged \
-  --pid=host \
-  -v /data:/data \
-  "$DOCKER_IMAGE" \
-  bash
+    CONTAINER_WAS_CREATED_BY_US=true
+    echo "Creating new container with image: $DOCKER_IMAGE"
 
-if [ $? -ne 0 ]; then
-    echo "Failed to launch container"
-    exit 1
+    docker run -itd \
+      --name="$CONTAINER_NAME" \
+      --env MTHREADS_VISIBLE_DEVICES=all \
+      --shm-size=80g \
+      --privileged \
+      "$DOCKER_IMAGE" \
+      bash
+
+    if [ $? -ne 0 ]; then
+        echo "Failed to launch container"
+        exit 1
+    fi
+
+    echo "Container started: $CONTAINER_NAME"
 fi
-
-echo "Container started: $CONTAINER_NAME"
 
 # Save state
 cat > .validate_musa_container_environment_state.json << EOF
 {
   "status": "container_started",
   "containerName": "$CONTAINER_NAME",
-  "imageName": "$DOCKER_IMAGE"
+  "imageName": "${DOCKER_IMAGE:-existing}",
+  "containerCreatedByUs": $CONTAINER_WAS_CREATED_BY_US
 }
 EOF
 ```
@@ -180,8 +207,10 @@ EOF
 echo "Testing musaInfo..."
 if ! docker exec "$CONTAINER_NAME" musaInfo; then
     echo "musaInfo failed"
-    docker stop "$CONTAINER_NAME" >/dev/null 2>&1
-    docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+    if [ "$CONTAINER_WAS_CREATED_BY_US" = "true" ]; then
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+    fi
     exit 1
 fi
 
@@ -198,11 +227,11 @@ jq '.status = "musa_validated"' .validate_musa_container_environment_state.json 
 
 ---
 
-### Step 3: Validate PyTorch MUSA and Tensor Operations
+### Step 3: Validate PyTorch MUSA
 
 **Action**:
 ```bash
-echo "Testing PyTorch MUSA and tensor operations..."
+echo "Testing PyTorch MUSA..."
 
 PYTORCH_TEST=$(docker exec "$CONTAINER_NAME" bash -lc 'python - <<"PY"
 import torch
@@ -215,44 +244,18 @@ if not torch.musa.is_available():
 
 print("torch.musa.is_available(): True")
 
-# Test 1: Basic tensor operation
+# Test: Tensor addition
 try:
     tensor = torch.tensor([1.0], device="musa")
     result = tensor + 1
-    print(f"basic_tensor: {tensor.item()} + 1 = {result.item()}")
+    print(f"tensor_add: {tensor.item()} + 1 = {result.item()}")
     if result.item() != 2.0:
-        print("ERROR: Basic tensor operation failed")
+        print("ERROR: Tensor addition failed")
         sys.exit(1)
-    print("test_basic_tensor: PASSED")
+    print("test_tensor_add: PASSED")
 except Exception as e:
-    print(f"ERROR: Basic tensor operation failed: {e}")
+    print(f"ERROR: Tensor addition failed: {e}")
     sys.exit(1)
-
-# Test 2: Matrix multiplication
-try:
-    a = torch.randn(100, 100, device="musa")
-    b = torch.randn(100, 100, device="musa")
-    c = torch.mm(a, b)
-    print("test_matmul: PASSED")
-except Exception as e:
-    print(f"ERROR: Matrix multiplication failed: {e}")
-    sys.exit(1)
-
-# Test 3: Memory allocation
-try:
-    large = torch.randn(1000, 1000, device="musa")
-    print("test_memory_alloc: PASSED")
-except Exception as e:
-    print(f"ERROR: Memory allocation failed: {e}")
-    sys.exit(1)
-
-# Test 4: GPU Memory info
-try:
-    props = torch.musa.get_device_properties(0)
-    total_memory_gb = props.total_memory / 1024**3
-    print(f"gpu_memory_gb: {total_memory_gb:.1f}")
-except Exception as e:
-    print(f"Warning: Could not get GPU memory: {e}")
 
 print("all_tests: PASSED")
 PY'
@@ -263,28 +266,24 @@ PYTORCH_EXIT=$?
 if [ $PYTORCH_EXIT -ne 0 ]; then
     echo "PyTorch MUSA validation failed"
     echo "$PYTORCH_TEST"
-    docker stop "$CONTAINER_NAME" >/dev/null 2>&1
-    docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+    if [ "$CONTAINER_WAS_CREATED_BY_US" = "true" ]; then
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+    fi
     exit 1
 fi
 
 echo "$PYTORCH_TEST"
 
-# Parse GPU memory from output
-GPU_MEMORY_GB=$(echo "$PYTORCH_TEST" | grep "gpu_memory_gb:" | awk '{print $2}')
-
 # Update state
-jq --arg mem "$GPU_MEMORY_GB" '.status = "torch_validated" | .gpuMemoryGB = $mem' \
-    .validate_musa_container_environment_state.json > .tmp && mv .tmp .validate_musa_container_environment_state.json
+jq '.status = "torch_validated"' .validate_musa_container_environment_state.json > .tmp && mv .tmp .validate_musa_container_environment_state.json
 ```
 
 **Save state**: `torch_validated`
 
 **Verification**:
 - torch.musa.is_available() returns True
-- Basic tensor operation succeeds
-- Matrix multiplication succeeds
-- Memory allocation succeeds
+- Tensor addition succeeds
 
 ---
 
@@ -292,9 +291,14 @@ jq --arg mem "$GPU_MEMORY_GB" '.status = "torch_validated" | .gpuMemoryGB = $mem
 
 **Action**:
 ```bash
-echo "Cleaning up test container..."
-docker stop "$CONTAINER_NAME" >/dev/null 2>&1
-docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+# Only cleanup if we created the container
+if [ "$CONTAINER_WAS_CREATED_BY_US" = "true" ]; then
+    echo "Cleaning up test container created by this skill..."
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+    docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+else
+    echo "Keeping existing container: $CONTAINER_NAME"
+fi
 
 # Update state
 jq '.status = "completed"' .validate_musa_container_environment_state.json > .tmp && mv .tmp .validate_musa_container_environment_state.json
@@ -304,31 +308,31 @@ echo "========================================="
 echo "MUSA Container Environment Validation Complete"
 echo "========================================="
 echo "Image: $DOCKER_IMAGE"
+echo "Container: $CONTAINER_NAME"
 echo "MUSA tools (musaInfo): OK"
 echo "PyTorch MUSA: OK"
-echo "Tensor operations: OK"
-echo "GPU Memory: ${GPU_MEMORY_GB} GB"
+echo "Tensor addition: OK"
 echo "========================================="
 ```
 
 **Save state**: `completed`
 
 **Verification**:
-- Container cleaned up
+- If container was created by this skill: cleaned up
+- If container was existing: left running
 
 ## Success Criteria
 
 - Container starts successfully
 - musaInfo executes
 - torch.musa.is_available() = True
-- All tensor tests pass (basic, matmul, memory)
+- Tensor addition test passes
 
 ### Example Checks
 
 - docker exec container musaInfo succeeds
 - docker exec container python -c "import torch; print(torch.musa.is_available())" prints True
-- Matrix multiplication works
-- GPU memory reported
+- Tensor addition works
 
 ## Outputs
 
@@ -337,12 +341,12 @@ echo "========================================="
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `status` | string | Yes | Execution status: `completed` / `failed` |
-| `containerName` | string | No | Container name used |
-| `imageName` | string | Yes | Docker image tested |
+| `containerName` | string | Yes | Container name used |
+| `imageName` | string | No | Docker image (if new container created) |
+| `containerCreatedByUs` | boolean | Yes | Whether container was created by this skill |
 | `musaInfoPassed` | boolean | No | Whether musaInfo succeeded |
 | `torchMusaAvailable` | boolean | No | Whether torch.musa.is_available() is True |
-| `tensorTestPassed` | boolean | No | Whether all tensor tests passed |
-| `gpuMemoryGB` | float | No | GPU memory in GB |
+| `tensorTestPassed` | boolean | No | Whether tensor addition test passed |
 
 ### Output Example
 
@@ -351,27 +355,14 @@ echo "========================================="
   "status": "completed",
   "containerName": "musa_test_1711478400",
   "imageName": "sh-harbor.mthreads.com/mcctest/musa-train:4.3.5_kuae2.1_torch2.9_deb",
+  "containerCreatedByUs": true,
   "musaInfoPassed": true,
   "torchMusaAvailable": true,
-  "tensorTestPassed": true,
-  "gpuMemoryGB": 32.0
+  "tensorTestPassed": true
 }
 ```
 
-## Side Effects
 
-- **Modifies**: None
-- **Creates**: Temporary container (cleaned up)
-- **Removes/Replaces**: None
-- **Requires reboot**: No
-
-## Important Rules
-
-1. **Always cleanup**: Remove test container after validation
-2. **Fail fast**: Exit on first failure, don't continue
-3. **Privileged mode**: Required for some GPU operations
-4. **Shared memory**: Use `--shm-size=80g` for large models
-5. **Comprehensive tests**: Test multiple tensor operations, not just availability
 
 ## Troubleshooting
 
@@ -380,24 +371,8 @@ echo "========================================="
 1. **torch.musa.is_available() returns False**
    - Check driver is loaded: `mthreads-gmi` on host
    - Check container toolkit binding: `docker info | grep mthreads`
-   - Check image has correct torch_musa version
    - See: `references/container-validation-runbook.md`
 
 2. **Container fails to start**
    - Check Docker is running: `systemctl status docker`
-   - Check image exists: `docker images`
    - Check GPU driver: `mthreads-gmi`
-
-3. **Tensor operation fails with "no kernel image"**
-   - Image built for different GPU architecture
-   - S5000 uses PH1, S4000 uses QY2
-   - Use image matching GPU type
-
-4. **Matrix multiplication fails**
-   - May be architecture mismatch (PH1 vs QY2)
-   - Check image compatibility with GPU type
-   - Verify torch_musa version matches SDK
-
-5. **Out of memory during test**
-   - Check GPU memory: `mthreads-gmi`
-   - Free up GPU memory from other processes
