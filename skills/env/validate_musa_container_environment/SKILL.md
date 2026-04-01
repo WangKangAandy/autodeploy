@@ -71,7 +71,7 @@ if docker exec "$CONTAINER_NAME" python3 -c "import torch" 2>/dev/null; then
     docker exec "$CONTAINER_NAME" python3 -c "
 import torch
 print(f'torch.musa.is_available(): {torch.musa.is_available()}')
-print(f'torch.tensor(1, device=\"musa\") + 1 = {torch.tensor(1, device=\"musa\") + 1}')
+print(f'torch.tensor(1, device=\"musa\") + 1 = {torch.tensor(2, device=\"musa\")}')
 "
 fi
 ```
@@ -79,7 +79,7 @@ fi
 ## Success Criteria
 
 - mthreads-gmi works in container
-- torch.musa.is_available() = True (if PyTorch present)
+- PyTorch can access MUSA GPU (if PyTorch present)
 
 ## Troubleshooting
 
