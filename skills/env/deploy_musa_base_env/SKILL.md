@@ -98,7 +98,7 @@ Verification Commands:
   Host driver: mthreads-gmi
   Container: docker run --rm --env MTHREADS_VISIBLE_DEVICES=all \\
     registry.mthreads.com/cloud-mirror/ubuntu:20.04 mthreads-gmi
-  PyTorch: python -c \"import torch; print(torch.musa.is_available())\"
+  PyTorch: python -c \"import torch; print(torch.musa.is_available()); print(torch.tensor(1, device='musa') + 1)\"
 ========================================="
 ```
 
