@@ -177,10 +177,10 @@ describe("plugin initialization", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
-      await setModeHandler!("tool-call-1", {
+      const modeHandler = toolHandlers.get("musa_mode")
+      await modeHandler!("tool-call-1", {
         mode: "remote",
         host: "10.0.0.1",
         user: "testuser",

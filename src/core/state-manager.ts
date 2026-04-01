@@ -1,7 +1,7 @@
 /**
  * State Management Layer
  *
- * Persistent state for hosts, operations, and tool executions.
+ * Persistent state for hosts and tool executions.
  */
 
 import * as fs from "fs"
@@ -10,12 +10,6 @@ import * as path from "path"
 // ============================================================================
 // Type Definitions
 // ============================================================================
-
-export type Intent =
-  | "deploy_env" | "update_driver" | "gpu_status" | "run_container"
-  | "validate" | "sync" | "auto" | "execute_document"
-  | "prepare_model" | "prepare_dataset" | "prepare_package"
-  | "manage_images" | "prepare_repo"
 
 export type HostSource = "manual" | "probed" | "config_file"
 
@@ -48,39 +42,6 @@ export interface HostState {
   }
 }
 
-export interface OperationKey {
-  hostId: string
-  intent: Intent
-  scope?: "env" | "host" | "cluster" | "service"
-  target?: string
-  resource?: string
-  version?: string
-}
-
-export interface Operation {
-  id: string
-  traceId?: string
-  parentSpanId?: string
-  sourceService?: string
-  type: "deployment" | "driver_update" | "validation" | "benchmark"
-  intent: Intent
-  operationKey: OperationKey
-  input: {
-    hostId: string
-    params: Record<string, unknown>
-  }
-  execution: {
-    startTime: string
-    endTime?: string
-    status: "pending" | "running" | "completed" | "failed" | "paused" | "interrupted"
-  }
-  result?: {
-    success: boolean
-    summary: string
-    error?: string
-  }
-}
-
 export interface ContextSnapshot {
   mode: "local" | "remote"
   defaultHost: string | null
@@ -103,14 +64,12 @@ export interface ToolExecution {
 // State Manager
 // ============================================================================
 
-const MAX_OPERATIONS = 100
 const MAX_TOOL_EXECUTIONS = 200
 
 export class StateManager {
   private workspacePath: string
   private stateDir: string
   private cache: Map<string, unknown> = new Map()
-  private lockHandle: fs.promises.FileHandle | null = null
   private _ready: boolean = false
 
   constructor(workspacePath: string) {
@@ -133,7 +92,7 @@ export class StateManager {
   async initialize(): Promise<void> {
     await fs.promises.mkdir(this.stateDir, { recursive: true })
 
-    const stateFiles = ["hosts.json", "operations.json", "tool-executions.json"]
+    const stateFiles = ["hosts.json", "tool-executions.json"]
     for (const file of stateFiles) {
       const filePath = path.join(this.stateDir, file)
       if (!fs.existsSync(filePath)) {
@@ -142,42 +101,6 @@ export class StateManager {
     }
 
     this._ready = true
-  }
-
-  // ==========================================================================
-  // Locking
-  // ==========================================================================
-
-  async acquireLock(timeout = 5000): Promise<boolean> {
-    const lockPath = path.join(this.stateDir, ".lock")
-    const startTime = Date.now()
-
-    while (Date.now() - startTime < timeout) {
-      try {
-        this.lockHandle = await fs.promises.open(lockPath, "wx")
-        return true
-      } catch (err: any) {
-        if (err.code === "EEXIST") {
-          await new Promise(r => setTimeout(r, 100))
-          continue
-        }
-        throw err
-      }
-    }
-    return false
-  }
-
-  async releaseLock(): Promise<void> {
-    if (!this.lockHandle) return
-    const lockPath = path.join(this.stateDir, ".lock")
-    try {
-      await this.lockHandle.close()
-      await fs.promises.unlink(lockPath)
-    } catch {
-      // Ignore
-    } finally {
-      this.lockHandle = null
-    }
   }
 
   // ==========================================================================
@@ -257,112 +180,6 @@ export class StateManager {
       port: defaultHost.port || 22,
       sudoPasswd: defaultHost.sudoPasswd,
     }
-  }
-
-  // ==========================================================================
-  // Operation Management
-  // ==========================================================================
-
-  async startOperationIfNoConflict(
-    intent: Intent,
-    params: Record<string, unknown>,
-    trace?: { traceId: string; parentSpanId?: string; sourceService?: string },
-  ): Promise<{ started: boolean; operationId?: string; conflict?: Operation }> {
-    const acquired = await this.acquireLock()
-    if (!acquired) throw new Error("Failed to acquire lock within timeout")
-
-    try {
-      const key = computeOperationKey(intent, params)
-      const conflict = await this.findConflictingOperation(key)
-      if (conflict) return { started: false, conflict }
-
-      const operationId = await this.startOperation(intent, params, trace)
-      return { started: true, operationId }
-    } finally {
-      await this.releaseLock()
-    }
-  }
-
-  async startOperation(
-    intent: Intent,
-    params: Record<string, unknown>,
-    trace?: { traceId: string; parentSpanId?: string; sourceService?: string },
-  ): Promise<string> {
-    const operations = await this.loadState<Operation[]>("operations.json")
-
-    const id = generateId("op")
-    const hostId = (params.hostId as string) || "local"
-
-    const operation: Operation = {
-      id,
-      traceId: trace?.traceId,
-      parentSpanId: trace?.parentSpanId,
-      sourceService: trace?.sourceService,
-      type: mapIntentToType(intent),
-      intent,
-      operationKey: computeOperationKey(intent, params),
-      input: { hostId, params },
-      execution: { startTime: new Date().toISOString(), status: "running" },
-    }
-
-    operations.push(operation)
-
-    // Trim old operations
-    if (operations.length > MAX_OPERATIONS) {
-      operations.splice(0, operations.length - MAX_OPERATIONS)
-    }
-
-    await this.saveState("operations.json", operations)
-    return id
-  }
-
-  async completeOperation(opId: string, result: { success: boolean; summary: string; error?: string }): Promise<void> {
-    const operations = await this.loadState<Operation[]>("operations.json")
-    const op = operations.find(o => o.id === opId)
-    if (op) {
-      op.execution.endTime = new Date().toISOString()
-      op.execution.status = result.success ? "completed" : "failed"
-      op.result = result
-      await this.saveState("operations.json", operations)
-    }
-  }
-
-  async getOperation(opId: string): Promise<Operation | null> {
-    const operations = await this.loadState<Operation[]>("operations.json")
-    return operations.find(o => o.id === opId) || null
-  }
-
-  async resumeOperation(operationId: string): Promise<boolean> {
-    const operations = await this.loadState<Operation[]>("operations.json")
-    const op = operations.find(o => o.id === operationId)
-    if (!op) return false
-
-    const resumable = ["paused", "interrupted"]
-    if (!resumable.includes(op.execution.status)) return false
-
-    op.execution.status = "running"
-    await this.saveState("operations.json", operations)
-    return true
-  }
-
-  async findConflictingOperation(key: OperationKey): Promise<Operation | null> {
-    const operations = await this.loadState<Operation[]>("operations.json")
-
-    return operations.find(op => {
-      if (!["pending", "running"].includes(op.execution.status)) return false
-
-      const opKey = op.operationKey
-      if (!opKey) {
-        return op.input.hostId === key.hostId && op.intent === key.intent
-      }
-
-      if (opKey.hostId !== key.hostId) return false
-      if (opKey.intent !== key.intent) return false
-      if (key.target && opKey.target && key.target !== opKey.target) return false
-      if (key.resource && opKey.resource && key.resource !== opKey.resource) return false
-
-      return true
-    }) || null
   }
 
   // ==========================================================================
@@ -473,40 +290,4 @@ export class StateManager {
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
-function mapIntentToType(intent: Intent): Operation["type"] {
-  switch (intent) {
-    case "deploy_env": case "execute_document": return "deployment"
-    case "update_driver": return "driver_update"
-    case "validate": return "validation"
-    default: return "benchmark"
-  }
-}
-
-function computeOperationKey(intent: Intent, params: Record<string, unknown>): OperationKey {
-  const key: OperationKey = {
-    hostId: (params.hostId as string) || "local",
-    intent,
-  }
-
-  switch (intent) {
-    case "deploy_env":
-      key.scope = "env"; key.target = (params.envName as string) || "default"
-      key.resource = "sdk"; key.version = params.sdkVersion as string
-      break
-    case "update_driver":
-      key.scope = "host"; key.resource = "driver"; key.version = params.driverVersion as string
-      break
-    case "run_container":
-      key.scope = "service"; key.target = params.containerName as string
-      key.resource = "container-image"; key.version = params.image as string
-      break
-    case "execute_document":
-      key.scope = "env"; key.target = (params.documentId as string) || "unknown"
-      key.resource = "document"
-      break
-  }
-
-  return key
 }

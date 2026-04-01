@@ -7,7 +7,7 @@ import {
   execute,
   refreshCache,
 } from "../core/executor"
-import { formatToolResult, formatToolError } from "../core/utils"
+import { formatToolResult, formatToolError, type ToolResult } from "../core/utils"
 import type { StateManager } from "../core/state-manager"
 import type { ExecOptions } from "../core/local-exec"
 import type { SSHConfig } from "../core/ssh-client"
@@ -32,27 +32,27 @@ interface ExecParams {
 }
 
 /**
- * Register musa_set_mode tool
- * Sets the deployment mode (local or remote)
+ * Register musa_mode tool
+ * Unified tool for getting/setting deployment mode
  */
-export function registerMusaSetModeTool(api: any, sm: StateManager | null = null): void {
+export function registerMusaModeTool(api: any, sm: StateManager | null = null): void {
   stateManager = sm
 
   api.registerTool({
-    name: "musa_set_mode",
-    description: `Set MUSA deployment mode: local or remote.
+    name: "musa_mode",
+    description: `Get or set MUSA deployment mode (local or remote).
 
-For local mode: No additional parameters needed.
-For remote mode: Provide SSH connection details (host, user, password).
+**Get mode:** Call without parameters to check current mode.
+**Set mode:** Provide mode and connection details for remote.
 
-This tool must be called before using musa_exec for remote deployment.`,
+Remote mode requires: host, user, password.`,
     parameters: {
       type: "object",
       properties: {
         mode: {
           type: "string",
           enum: ["local", "remote"],
-          description: "Deployment mode: 'local' or 'remote'",
+          description: "Set mode: 'local' or 'remote'. Omit to get current mode.",
         },
         host: {
           type: "string",
@@ -76,10 +76,14 @@ This tool must be called before using musa_exec for remote deployment.`,
           description: "Sudo password for remote host (optional, defaults to SSH password)",
         },
       },
-      required: ["mode"],
     },
     async execute(_toolCallId: string, params: SetModeParams) {
       try {
+        // No mode parameter: get current mode
+        if (!params.mode) {
+          return await getCurrentMode()
+        }
+
         const { mode, host, user, password, port = 22, sudoPasswd } = params
 
         if (mode === "remote") {
@@ -122,11 +126,7 @@ This tool must be called before using musa_exec for remote deployment.`,
             success: true,
             mode: "remote",
             message: `Deployment mode set to remote. Target: ${user}@${host}:${port}`,
-            connection: {
-              host,
-              user,
-              port,
-            },
+            connection: { host, user, port },
           })
         } else {
           // Local mode: clear default host
@@ -149,6 +149,76 @@ This tool must be called before using musa_exec for remote deployment.`,
 }
 
 /**
+ * Get current deployment mode
+ */
+async function getCurrentMode(): Promise<ToolResult> {
+  if (!stateManager) {
+    const mode = getMode()
+    const config = getRemoteConfig()
+
+    if (mode === "remote" && config) {
+      return formatToolResult({
+        mode: "remote",
+        connection: { host: config.host, user: config.user, port: config.port },
+        ready: isRemoteReady(),
+        source: "executor_cache",
+      })
+    }
+
+    return formatToolResult({ mode: "local", ready: true, source: "executor_cache" })
+  }
+
+  try {
+    const mode = await stateManager.getExecutionMode()
+    const defaultHost = await stateManager.getDefaultHost()
+
+    if (mode === "remote" && defaultHost) {
+      return formatToolResult({
+        mode: "remote",
+        connection: {
+          host: defaultHost.host,
+          user: defaultHost.user,
+          port: defaultHost.port || 22,
+        },
+        hostId: defaultHost.id,
+        status: defaultHost.status,
+        environment: defaultHost.environment,
+        ready: true,
+        source: "state_manager",
+      })
+    }
+
+    return formatToolResult({
+      mode: "local",
+      ready: true,
+      hostsCount: 0,
+      source: "state_manager",
+    })
+  } catch (err) {
+    console.error("[musa_mode] Failed to read from StateManager:", (err as Error).message)
+    const mode = getMode()
+    const config = getRemoteConfig()
+
+    if (mode === "remote" && config) {
+      return formatToolResult({
+        mode: "remote",
+        connection: { host: config.host, user: config.user, port: config.port },
+        ready: isRemoteReady(),
+        source: "executor_cache_fallback",
+        error: (err as Error).message,
+      })
+    }
+
+    return formatToolResult({
+      mode: "local",
+      ready: true,
+      source: "executor_cache_fallback",
+      error: (err as Error).message,
+    })
+  }
+}
+
+/**
  * Register musa_exec tool
  * Executes a shell command for MUSA deployment
  */
@@ -162,7 +232,7 @@ export function registerMusaExecTool(api: any, sm: StateManager | null = null): 
     description: `Execute a shell command for MUSA deployment.
 
 Automatically uses local or remote mode based on the current session settings.
-Use musa_set_mode first to switch between local and remote deployment.
+Use musa_mode to switch between local and remote deployment.
 
 Common use cases:
 - System package installation (apt install)
@@ -201,7 +271,7 @@ Common use cases:
 
         if (mode === "remote" && !isRemoteReady()) {
           return formatToolError(
-            "Remote mode is not configured. Call musa_set_mode first with host, user, and password.",
+            "Remote mode is not configured. Call musa_mode with host, user, and password.",
             { currentMode: mode }
           )
         }
@@ -255,99 +325,3 @@ Common use cases:
   })
 }
 
-/**
- * Register musa_get_mode tool
- * Returns the current deployment mode
- */
-export function registerMusaGetModeTool(api: any): void {
-  api.registerTool({
-    name: "musa_get_mode",
-    description: `Get the current MUSA deployment mode.
-
-Returns:
-- mode: 'local' or 'remote'
-- connection info if in remote mode (sanitized - no passwords)`,
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-    async execute(_toolCallId: string, _params: Record<string, unknown>) {
-      if (!stateManager) {
-        const mode = getMode()
-        const config = getRemoteConfig()
-
-        if (mode === "remote" && config) {
-          return formatToolResult({
-            mode: "remote",
-            connection: {
-              host: config.host,
-              user: config.user,
-              port: config.port,
-            },
-            ready: isRemoteReady(),
-            source: "executor_cache",
-          })
-        }
-
-        return formatToolResult({
-          mode: "local",
-          ready: true,
-          source: "executor_cache",
-        })
-      }
-
-      try {
-        const mode = await stateManager.getExecutionMode()
-        const defaultHost = await stateManager.getDefaultHost()
-
-        if (mode === "remote" && defaultHost) {
-          return formatToolResult({
-            mode: "remote",
-            connection: {
-              host: defaultHost.host,
-              user: defaultHost.user,
-              port: defaultHost.port || 22,
-            },
-            hostId: defaultHost.id,
-            status: defaultHost.status,
-            environment: defaultHost.environment,
-            ready: true,
-            source: "state_manager",
-          })
-        }
-
-        return formatToolResult({
-          mode: "local",
-          ready: true,
-          hostsCount: 0,
-          source: "state_manager",
-        })
-      } catch (err) {
-        console.error("[musa_get_mode] Failed to read from StateManager:", (err as Error).message)
-        const mode = getMode()
-        const config = getRemoteConfig()
-
-        if (mode === "remote" && config) {
-          return formatToolResult({
-            mode: "remote",
-            connection: {
-              host: config.host,
-              user: config.user,
-              port: config.port,
-            },
-            ready: isRemoteReady(),
-            source: "executor_cache_fallback",
-            error: (err as Error).message,
-          })
-        }
-
-        return formatToolResult({
-          mode: "local",
-          ready: true,
-          source: "executor_cache_fallback",
-          error: (err as Error).message,
-        })
-      }
-    },
-  })
-}

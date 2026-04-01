@@ -3,7 +3,7 @@ import * as os from "os"
 import { registerMusaTools } from "./tools"
 import { ensureAllInjected, checkInjected } from "./utils/inject-manager"
 
-// Note: TypeScript modules (adapter, dispatcher, state-manager) need to be compiled
+// Note: TypeScript modules (adapter, state-manager) need to be compiled
 // before use. Run: npm run build
 
 /**
@@ -38,7 +38,7 @@ const plugin = {
   id: "openclaw-musa",
   name: "MUSA Deployment Platform",
   description:
-    "Platform runtime layer for MUSA SDK deployment and GPU management. Provides unified dispatcher, state management, and cognitive injection.",
+    "Platform runtime layer for MUSA SDK deployment and GPU management. Provides state management and cognitive injection.",
   configSchema: {
     type: "object",
     properties: {
@@ -85,35 +85,29 @@ const plugin = {
       staticRules: injectStatus.agents || false,
       identity: injectStatus.identity || false,
       dynamicContext: false,
-      dispatcher: false,
       stateManager: false,
     }
 
     let stateManager: any = null
     let registerHooks: any = null
-    let registerDispatcherTool: any = null
 
     try {
       const { StateManager } = require("./core/state-manager")
       const { registerHooks: registerHooksFn } = require("./adapter/hooks")
-      const { registerDispatcherTool: registerDispatcher } = require("./dispatcher")
 
       const workspacePath = api.getWorkspacePath?.() || process.cwd()
       stateManager = new StateManager(workspacePath)
       await stateManager.initialize()
 
       registerHooks = registerHooksFn
-      registerDispatcherTool = registerDispatcher
 
       capabilities.dynamicContext = true
-      capabilities.dispatcher = true
       capabilities.stateManager = true
 
       log("Platform runtime layer loaded (enhanced mode)")
     } catch (err: any) {
       warn("Enhanced platform layer not available. Run 'npm run build' to compile TypeScript.")
       warn(`Error: ${err.message}`)
-      capabilities.dispatcher = true
     }
 
     // 3. Register hooks for dynamic context injection (if available)
@@ -122,15 +116,9 @@ const plugin = {
       log("Registered adapter hooks: before_prompt_build, session_end")
     }
 
-    // 4. Register dispatcher tool as primary entry point (if available)
-    if (registerDispatcherTool && stateManager) {
-      registerDispatcherTool(api, stateManager)
-      log("Registered dispatcher tool: musa_dispatch")
-    }
-
-    // 5. Register existing tools (fallback layer)
+    // 4. Register execution tools
     registerMusaTools(api, stateManager)
-    log("Registered execution tools: musa_set_mode, musa_get_mode, musa_exec, musa_docker, musa_sync")
+    log("Registered execution tools: musa_mode, musa_exec, musa_docker, musa_sync")
 
     // Tool call logging with trace context
     api.on("before_tool_call", (event: any) => {
@@ -158,16 +146,11 @@ const plugin = {
     log(`  Static Rules (AGENTS.md): ${capabilities.staticRules ? "✓" : "✗"}`)
     log(`  Identity (IDENTITY.md): ${capabilities.identity ? "✓" : "✗"}`)
     log(`  Dynamic Context (hook): ${capabilities.dynamicContext ? "✓" : "✗"}`)
-    log(`  Dispatcher (manual): ${capabilities.dispatcher ? "✓" : "✗"}`)
     log(`  State Manager: ${capabilities.stateManager ? "✓" : "✗"}`)
     log("=============================")
 
     if (!capabilities.staticRules) {
       warn("Static rules not available. Check AGENTS.md merge status.")
-    }
-
-    if (!capabilities.dynamicContext) {
-      log("Note: Platform degraded mode - musa_dispatch still callable manually")
     }
 
     log("MUSA Deployment Platform initialized")

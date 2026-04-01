@@ -29,7 +29,7 @@ export async function refreshCache(): Promise<void> {
       cachedMode = "remote"
       cachedRemoteConfig = remoteConfig as SSHConfig
     } else {
-      throw new Error("Execution mode is 'remote' but remote config is incomplete. Use musa_set_mode.")
+      throw new Error("Execution mode is 'remote' but remote config is incomplete. Use musa_mode.")
     }
   } else {
     cachedMode = "local"
@@ -56,7 +56,7 @@ async function ensureCacheSynced(): Promise<void> {
 export async function execute(command: string, options: ExecOptions = {}): Promise<ExecResult> {
   await ensureCacheSynced()
   if (cachedMode === "remote") {
-    if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_set_mode.")
+    if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_mode.")
     return execRemote(cachedRemoteConfig!, command, options)
   }
   return execLocal(command, options)
@@ -65,7 +65,7 @@ export async function execute(command: string, options: ExecOptions = {}): Promi
 export async function executeDocker(args: DockerExecArgs): Promise<ExecResult> {
   await ensureCacheSynced()
   if (cachedMode === "remote") {
-    if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_set_mode.")
+    if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_mode.")
     if (cachedRemoteConfig!.sudoPasswd && !args.sudoPasswd) {
       args.sudoPasswd = cachedRemoteConfig!.sudoPasswd
     }
@@ -81,6 +81,6 @@ export async function executeSync(args: SyncArgs): Promise<ExecResult> {
     const dst = args.direction === "push" ? args.remotePath : args.localPath
     return execLocal(`cp -r "${src}" "${dst}"`, { timeout: args.timeout })
   }
-  if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_set_mode.")
+  if (!isRemoteReady()) throw new Error("Remote mode not configured. Use musa_mode.")
   return syncFiles(cachedRemoteConfig!, args)
 }

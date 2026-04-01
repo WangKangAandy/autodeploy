@@ -24,7 +24,7 @@ export function registerMusaSyncTool(api: any, sm: StateManager | null = null): 
     name: "musa_sync",
     description: `Sync files between local machine and remote host for MUSA deployment.
 
-Only available in remote mode. Use musa_set_mode first to configure remote connection.
+Only available in remote mode. Use musa_mode to configure remote connection.
 
 Directions:
 - push: Copy local files to remote host
@@ -80,7 +80,7 @@ Uses rsync over SSH for efficient file transfer.`,
 
         if (!isRemoteReady()) {
           return formatToolError(
-            "Remote mode is not configured. Call musa_set_mode first with host, user, and password.",
+            "Remote mode is not configured. Call musa_mode with host, user, and password.",
             { currentMode: mode }
           )
         }

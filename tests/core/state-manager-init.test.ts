@@ -99,10 +99,9 @@ describe("StateManager Initialization", () => {
       stateManager = new StateManager(tempDir)
       await stateManager.initialize()
 
-      // Simplified state manager only creates 3 files
+      // Simplified state manager only creates 2 files
       const stateFiles = [
         "hosts.json",
-        "operations.json",
         "tool-executions.json",
       ]
 

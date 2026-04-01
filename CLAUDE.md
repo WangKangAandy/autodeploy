@@ -47,20 +47,15 @@ This is an OpenClaw plugin for MUSA SDK environment deployment. It provides:
 
 ## Architecture
 
-This is a **platform runtime layer** with four core capabilities:
+This is a **platform runtime layer** with three core capabilities:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  阶段 1: 工具集合 → 阶段 2: 调度层 → 阶段 3: 运行时基座          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    四大核心能力                                  │
+│                    三大核心能力                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  1. Static Rules    — inject/ 目录声明式注入 (AGENTS, IDENTITY) │
 │  2. Dynamic Context — before_prompt_build hook 动态上下文注入    │
-│  3. Dispatcher      — musa_dispatch 统一意图路由                 │
-│  4. State Manager   — 部署状态持久化与恢复                       │
+│  3. State Manager   — 部署状态持久化与恢复                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -94,46 +89,16 @@ The plugin uses a **declarative injection system** to merge static content into 
 }
 ```
 
-**Manual Refresh:** `node scripts/install.js install ~/.openclaw/workspace`
-
-## Unified Dispatcher
-
-`musa_dispatch` is the single entry point for all MUSA operations:
-
-```
-User Request → Intent Parser → Router → Pre-check → Permission Gate → Handler
-```
-
-**Route Types:**
-- `skill` — Atomic skill execution (SKILL.md path)
-- `orchestration` — Meta skill with step sequence
-- `tool` — Direct tool call (musa_exec, musa_docker)
-- `direct` — Direct execution instructions
-
-**Intent Mapping:**
-
-| Intent | Route | Type |
-|--------|-------|------|
-| `deploy_env` | deploy_musa_base_env | meta |
-| `update_driver` | update_musa_driver | meta |
-| `gpu_status` | musa_exec tool | tool |
-| `validate` | validation skill | atomic |
-| `execute_document` | document pipeline | orchestration |
-| `prepare_model` | prepare_model_artifacts | atomic |
-| `prepare_dataset` | prepare_dataset_artifacts | atomic |
-| `prepare_package` | prepare_musa_package | atomic |
-| `prepare_repo` | prepare_dependency_repo | atomic |
+**Manual Refresh:** `node install.js install ~/.openclaw/workspace`
 
 ## State Manager
 
 `src/core/state-manager.ts` provides persistence for deployment operations:
 
 - **Hosts** — Mode, credentials, last_seen timestamps
-- **Operations** — traceId, status, conflict detection, atomic lifecycle
-- **Jobs** — Execution tracking with span IDs
-- **Deployment** — Progress recovery from checkpoints
+- **Tool Executions** — Recent tool calls for debugging
 
-State files stored in `autodeploy/` directory: `hosts.json`, `operations.json`, `jobs.json`, `state.json`.
+State files stored in `autodeploy/` directory: `hosts.json`, `tool-executions.json`.
 
 ## Repository Structure
 
@@ -142,8 +107,6 @@ State files stored in `autodeploy/` directory: `hosts.json`, `operations.json`, 
 | `index.js` | OpenClaw plugin entry point |
 | `inject/` | Declarative injection sources (AGENTS, IDENTITY) |
 | `src/core/` | Core executors and StateManager |
-| `src/dispatcher/` | Unified dispatch system (intent parser, router, orchestrator) |
-| `src/document/` | Document-driven execution engine (loader, parser, executor) |
 | `src/adapter/` | OpenClaw hooks and dynamic context builder |
 | `src/shared/` | Trace framework and structured logging |
 | `src/tools/` | OpenClaw tool definitions (musa_*) |
@@ -409,7 +372,6 @@ Use `jq` to read/write state fields.
 | 代码 | 文档 |
 |------|------|
 | `skills/index.yml` | [docs/doc-sync/skills.md](docs/doc-sync/skills.md) |
-| `src/dispatcher/**` | [docs/doc-sync/dispatcher.md](docs/doc-sync/dispatcher.md) |
 | `src/core/state-manager.ts` | [docs/doc-sync/state-manager.md](docs/doc-sync/state-manager.md) |
 | `src/shared/trace.ts`, `src/shared/logger.ts` | [docs/doc-sync/tracing.md](docs/doc-sync/tracing.md) |
 
@@ -426,12 +388,12 @@ When debugging issues from Feishu/Dingding messages, use traceId to trace the en
 **Log Locations:**
 | Log | Path | Content |
 |-----|------|---------|
-| State persistence | `autodeploy/` | hosts.json, operations.json, jobs.json |
+| State persistence | `autodeploy/` | hosts.json, tool-executions.json |
 | Console output | stdout | Structured logs with traceId |
 
 **TraceId Flow:**
 ```
-Feishu message (messageId) → traceId → Dispatcher → Tool calls → State persistence
+Feishu message (messageId) → traceId → Tool calls → State persistence
 ```
 
 **Debugging Steps:**
@@ -442,10 +404,7 @@ Feishu message (messageId) → traceId → Dispatcher → Tool calls → State p
 grep "\[TRACE:<messageId>\]" ~/.openclaw/logs/plugin.log
 
 # 3. Check operation state
-cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
-
-# 4. Check job progress
-cat autodeploy/jobs.json | jq '.[] | select(.traceId == "<messageId>")'
+cat autodeploy/tool-executions.json | jq '.[-5:]'
 ```
 
 **Log Format:**

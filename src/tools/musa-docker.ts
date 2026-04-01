@@ -38,7 +38,7 @@ MT-GPU containers are automatically configured with:
 - MTHREADS_VISIBLE_DEVICES=all
 - MTHREADS_DRIVER_CAPABILITIES=compute,utility
 
-Use musa_set_mode first to switch between local and remote deployment.`,
+Use musa_mode to switch between local and remote deployment.`,
     parameters: {
       type: "object",
       properties: {
@@ -99,7 +99,7 @@ Use musa_set_mode first to switch between local and remote deployment.`,
 
         if (mode === "remote" && !isRemoteReady()) {
           return formatToolError(
-            "Remote mode is not configured. Call musa_set_mode first with host, user, and password.",
+            "Remote mode is not configured. Call musa_mode with host, user, and password.",
             { currentMode: mode }
           )
         }
