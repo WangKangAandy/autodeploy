@@ -76,11 +76,17 @@ DOCKER_IMAGE=$(yq '.compatibility[0].supported_images[0]' "$CONFIG")
 
 ### Step 2-6: Execute Atomic Skills
 
-Call each atomic skill in sequence. If any fails, report error and stop.
+Call each atomic skill in sequence, set status after each.
 
+```bash
+ensure_system_dependencies() && STATUS_DEPS="✓"
+ensure_musa_driver() && STATUS_DRIVER="✓"
+ensure_mt_container_toolkit() && STATUS_TOOLKIT="✓"
+manage_container_images() && STATUS_IMAGE="✓"
+validate_musa_container_environment() && STATUS_VALIDATION="✓"
 ```
-ensure_system_dependencies() → ensure_musa_driver() → ensure_mt_container_toolkit() → manage_container_images() → validate_musa_container_environment()
-```
+
+If any fails, stop (failure_policy: fail_fast).
 
 ---
 
@@ -94,11 +100,12 @@ SDK Version: $MUSA_SDK_VERSION
 Driver Version: $MT_GPU_DRIVER_VERSION
 Docker Image: $DOCKER_IMAGE
 
-Verification Commands:
-  Host driver: mthreads-gmi
-  Container: docker run --rm --env MTHREADS_VISIBLE_DEVICES=all \\
-    registry.mthreads.com/cloud-mirror/ubuntu:20.04 mthreads-gmi
-  PyTorch: python -c \"import torch; print(torch.musa.is_available()); print(torch.tensor(1, device='musa') + 1)\"
+Deployment Status:
+  [$STATUS_DEPS] System dependencies
+  [$STATUS_DRIVER] MUSA driver
+  [$STATUS_TOOLKIT] Container toolkit
+  [$STATUS_IMAGE] Docker image
+  [$STATUS_VALIDATION] Container GPU access
 ========================================="
 ```
 
@@ -113,4 +120,4 @@ State values: `initialized` → `dependencies_installed` → `driver_installed` 
 - All atomic skills completed
 - mthreads-gmi works on host
 - Container can access GPU
-- torch.musa.is_available() = True
+- PyTorch's tensor addition verification works
