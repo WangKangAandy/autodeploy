@@ -12,11 +12,20 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
+
+// Prebuild check: ensure dist/ exists before requiring compiled modules
+const distPath = path.join(__dirname, "dist");
+if (!fs.existsSync(distPath)) {
+  console.error("[autodeploy] Error: dist/ not found. Run 'npm run build' first.");
+  process.exit(1);
+}
+
 const {
   ensureAllInjected,
   uninjectAll,
   INJECT_SOURCES,
-} = require("../src/utils/inject-manager");
+} = require("./dist/utils/inject-manager");
 
 /**
  * Initialize state directory
@@ -78,11 +87,31 @@ function cleanupStateDir(workspacePath, keepState = true) {
 }
 
 /**
+ * Configure memory search extraPaths
+ */
+function configureMemorySearchExtraPaths(action, knowledgePath) {
+  try {
+    if (action === "add") {
+      const cmd = `openclaw config set agents.defaults.memorySearch.extraPaths --strict-json '["${knowledgePath}"]'`;
+      execSync(cmd, { stdio: "inherit" });
+    } else if (action === "remove") {
+      const cmd = `openclaw config set agents.defaults.memorySearch.extraPaths --strict-json '[]'`;
+      execSync(cmd, { stdio: "inherit" });
+    }
+    return true;
+  } catch (error) {
+    console.warn(`[autodeploy] ⚠ Failed to configure extraPaths:`, error.message);
+    return false;
+  }
+}
+
+/**
  * Main installation function
  */
 function install(options) {
   const { workspacePath, pluginDir, action = "install", keepState = true } = options;
   const injectDir = path.join(pluginDir, "inject");
+  const knowledgePath = path.join(pluginDir, "knowledge");
 
   console.log(`[autodeploy] ${action} starting...`);
   console.log(`[autodeploy] Plugin dir: ${pluginDir}`);
@@ -101,10 +130,12 @@ function install(options) {
         }
       }
       initializeStateDir(workspacePath);
+      configureMemorySearchExtraPaths("add", knowledgePath);
       console.log("[autodeploy] Installation complete");
       break;
 
     case "uninstall":
+      configureMemorySearchExtraPaths("remove", knowledgePath);
       const uninjectResults = uninjectAll(workspacePath);
       for (const [source, result] of Object.entries(uninjectResults)) {
         console.log(`[autodeploy] Uninject ${source}: ${result.status}`);
@@ -126,7 +157,7 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const action = args[0] || "install";
   const workspacePath = args[1] || process.cwd();
-  const pluginDir = path.resolve(__dirname, "..");
+  const pluginDir = __dirname;
 
   install({
     workspacePath,
@@ -142,5 +173,6 @@ module.exports = {
   uninjectAll,
   initializeStateDir,
   cleanupStateDir,
+  configureMemorySearchExtraPaths,
   INJECT_SOURCES,
 };
