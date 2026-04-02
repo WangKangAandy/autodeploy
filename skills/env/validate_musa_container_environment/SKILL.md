@@ -81,6 +81,9 @@ fi
 - mthreads-gmi works in container
 - PyTorch can access MUSA GPU (if PyTorch present)
 
+## Attentions
+- If the user gives a document, and it includes inference, training, or other operations, strictly follow those steps instead of stopping after PyTorch validation!
+
 ## Troubleshooting
 
 1. **mthreads-gmi fails** - Check container toolkit binding

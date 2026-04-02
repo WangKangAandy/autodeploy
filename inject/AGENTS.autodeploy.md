@@ -56,6 +56,13 @@ SKILL.md bash snippets are **multi-line script fragments**. When executing via `
 - **Never** join `if/fi`, `case/esac`, or loops with `&&` on a single line
 - Control structures require newlines or semicolons between clauses
 
+
+### Tool Calling Workflow
+After calling any tool and receiving results, immediately synthesize the information and fully answer the user's original question. Do not stop and wait for the user to prompt again.
+**Rule**: Calling a tool is always an intermediate step — finish the answer before expecting user input.
+
+
+
 ### Debugging with TraceId
 
 When investigating issues from Feishu/Dingding:
