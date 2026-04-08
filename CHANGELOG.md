@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-04-01
+
+### Removed
+- `src/dispatcher/` - Removed unified dispatcher (musa_dispatch tool)
+- `docs/doc-sync/dispatcher.md` - Removed dispatcher documentation
+- `references/document-driven-execution.md` - Removed (no longer needed without dispatcher)
+- `musa_set_mode` and `musa_get_mode` tools - merged into single `musa_mode` tool
+- Operation management from StateManager (startOperation, completeOperation, getOperation, resumeOperation, findConflictingOperation, acquireLock, releaseLock)
+- `operations.json` state file - no longer needed
+
+### Changed
+- Execution Contract rules moved from dispatcher to `inject/AGENTS.autodeploy.md`
+- Documentation updated to reflect three core capabilities (removed dispatcher layer)
+- Plugin entry point simplified to register musa_* tools directly
+- `musa_mode` now handles both get and set operations (call without params to get mode)
+- `src/adapter/hooks.ts` simplified - removed duplicate try/catch blocks
+- StateManager slimmed down to ~200 lines (from ~500)
+
+### Added
+- `install.js` - Added memorySearch extraPaths configuration for knowledge directory
+- `knowledge/` - Directory for searchable knowledge documents
+
 ## [1.0.0] - 2025-03-28
 
 ### Added

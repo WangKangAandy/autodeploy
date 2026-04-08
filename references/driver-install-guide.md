@@ -237,7 +237,7 @@ Key considerations:
 
 When executing on Remote MT-GPU Machine:
 
-- Use `remote-exec` tool for host-level commands (driver installation, modprobe)
-- Use `remote-sync` to transfer downloaded driver packages
+- Use `musa_exec` tool for host-level commands (driver installation, modprobe)
+- Use `musa_sync` to transfer downloaded driver packages
 - Keep driver package paths aligned with remote path conventions:
   - Remote host: `~/workspace/<project>/musa_packages/`

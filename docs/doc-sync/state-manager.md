@@ -8,18 +8,19 @@
 
 | 状态域 | 文件 | 内容 |
 |--------|------|------|
-| Hosts | `hosts.json` | 主机配置 |
-| Operations | `operations.json` | 操作记录 |
-| Jobs | `jobs.json` | 任务进度 |
-| Deployment | `state.json` | 部署进度 |
+| Hosts | `hosts.json` | 主机配置、SSH 凭据 |
+| Tool Executions | `tool-executions.json` | 最近工具执行记录 |
 
-## Operation 生命周期
+## 主要方法
 
-```
-pending → running → completed / failed / cancelled
-              ↓
-         awaiting_input
-```
+| 方法 | 用途 |
+|------|------|
+| `registerHost()` | 注册/更新主机 |
+| `getDefaultHost()` | 获取默认主机 |
+| `setDefaultHost()` | 设置默认主机 |
+| `getExecutionMode()` | 获取执行模式 (local/remote) |
+| `recordToolExecution()` | 记录工具执行 |
+| `loadSnapshot()` | 加载上下文快照 |
 
 ## 持久化位置
 

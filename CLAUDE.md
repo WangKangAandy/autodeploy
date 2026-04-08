@@ -43,25 +43,19 @@ This repository contains executable automation skills organized in a hierarchica
 
 This is an OpenClaw plugin for MUSA SDK environment deployment. It provides:
 - OpenClaw plugin with `musa_*` tools for local/remote deployment
-- MCP server (`agent-tools/`) for Claude Code integration via SSH
 - Executable skills for full MUSA environment setup and driver management
 
 ## Architecture
 
-This is a **platform runtime layer** with four core capabilities:
+This is a **platform runtime layer** with three core capabilities:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  阶段 1: 工具集合 → 阶段 2: 调度层 → 阶段 3: 运行时基座          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    四大核心能力                                  │
+│                    三大核心能力                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  1. Static Rules    — inject/ 目录声明式注入 (AGENTS, IDENTITY) │
 │  2. Dynamic Context — before_prompt_build hook 动态上下文注入    │
-│  3. Dispatcher      — musa_dispatch 统一意图路由                 │
-│  4. State Manager   — 部署状态持久化与恢复                       │
+│  3. State Manager   — 部署状态持久化与恢复                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,55 +89,16 @@ The plugin uses a **declarative injection system** to merge static content into 
 }
 ```
 
-**Manual Refresh:** `node scripts/install.js install ~/.openclaw/workspace`
-
-The repository has two parallel tool implementations:
-
-| Layer | Path | Protocol | Tools |
-|-------|------|----------|-------|
-| OpenClaw Plugin | `src/` | OpenClaw API | `musa_exec`, `musa_docker`, `musa_sync`, `musa_set_mode`, `musa_get_mode` |
-| MCP Server | `agent-tools/src/` | MCP Protocol | `remote-exec`, `remote-docker`, `remote-sync` |
-
-Both layers share the same execution model (local vs remote) and credentials.
-
-## Unified Dispatcher
-
-`musa_dispatch` is the single entry point for all MUSA operations:
-
-```
-User Request → Intent Parser → Router → Pre-check → Permission Gate → Handler
-```
-
-**Route Types:**
-- `skill` — Atomic skill execution (SKILL.md path)
-- `orchestration` — Meta skill with step sequence
-- `tool` — Direct tool call (musa_exec, musa_docker)
-- `direct` — Direct execution instructions
-
-**Intent Mapping:**
-
-| Intent | Route | Type |
-|--------|-------|------|
-| `deploy_env` | deploy_musa_base_env | meta |
-| `update_driver` | update_musa_driver | meta |
-| `gpu_status` | remote-exec tool | tool |
-| `validate` | validation skill | atomic |
-| `execute_document` | document pipeline | orchestration |
-| `prepare_model` | prepare_model_artifacts | atomic |
-| `prepare_dataset` | prepare_dataset_artifacts | atomic |
-| `prepare_package` | prepare_musa_package | atomic |
-| `prepare_repo` | prepare_dependency_repo | atomic |
+**Manual Refresh:** `node install.js install ~/.openclaw/workspace`
 
 ## State Manager
 
 `src/core/state-manager.ts` provides persistence for deployment operations:
 
 - **Hosts** — Mode, credentials, last_seen timestamps
-- **Operations** — traceId, status, conflict detection, atomic lifecycle
-- **Jobs** — Execution tracking with span IDs
-- **Deployment** — Progress recovery from checkpoints
+- **Tool Executions** — Recent tool calls for debugging
 
-State files stored in `autodeploy/` directory: `hosts.json`, `operations.json`, `jobs.json`, `state.json`.
+State files stored in `autodeploy/` directory: `hosts.json`, `tool-executions.json`.
 
 ## Repository Structure
 
@@ -152,13 +107,10 @@ State files stored in `autodeploy/` directory: `hosts.json`, `operations.json`, 
 | `index.js` | OpenClaw plugin entry point |
 | `inject/` | Declarative injection sources (AGENTS, IDENTITY) |
 | `src/core/` | Core executors and StateManager |
-| `src/dispatcher/` | Unified dispatch system (intent parser, router, orchestrator) |
-| `src/document/` | Document-driven execution engine (loader, parser, executor) |
 | `src/adapter/` | OpenClaw hooks and dynamic context builder |
 | `src/shared/` | Trace framework and structured logging |
 | `src/tools/` | OpenClaw tool definitions (musa_*) |
 | `src/utils/` | Utility modules (inject-manager, agents-merge) |
-| `agent-tools/src/` | MCP server implementation |
 | `skills/` | Executable automation skills (meta and atomic) |
 | `references/` | Non-executable knowledge resources |
 | `autodeploy/` | Runtime state files (JSON persistence) |
@@ -171,19 +123,10 @@ npm install
 npm run build  # Compile TypeScript modules to dist/
 ```
 
-### Agent Tools (MCP Server)
-```bash
-cd agent-tools && npm install && npm run build
-```
-
 ## Test Commands
 
 ```bash
-# Root tests (dispatcher, document)
 npm test
-
-# Agent Tools unit tests
-cd agent-tools && npm test
 ```
 
 ## Deployment Validation Commands
@@ -217,25 +160,17 @@ Before executing remote commands, set the deployment mode:
 - OpenClaw tools: Use `musa_set_mode(mode="remote", host, user, password, port)`
 - MCP tools: Credentials are loaded from environment or config file
 
-### Tool Routing (OpenClaw vs MCP)
-
-| OpenClaw Tool | MCP Tool | Purpose |
-|---------------|----------|---------|
-| `musa_exec` | `remote-exec` | Execute shell commands on remote host via SSH |
-| `musa_docker` | `remote-docker` | Execute commands in Docker containers (supports `docker exec` and `docker run`) |
-| `musa_sync` | `remote-sync` | Sync files between local and remote via rsync |
-
 ### Command Routing Rules
 
 Route commands to the appropriate tool based on target:
 
 | Target | Tool | Parameters |
 |--------|------|------------|
-| `docker exec <container> <cmd>` | `musa_docker` / `remote-docker` | `name=<container>`, `command=<cmd>` |
-| `docker run ... <image> <cmd>` | `musa_docker` / `remote-docker` | `image=<image>`, `command=<cmd>` |
-| `docker cp`, `docker logs`, other docker commands | `musa_exec` / `remote-exec` | `command=<full docker command>` |
-| Host commands (`dpkg`, `systemctl`, driver checks) | `musa_exec` / `remote-exec` | `command=<cmd>` |
-| File transfer local ↔ remote | `musa_sync` / `remote-sync` | `localPath`, `remotePath`, `direction` |
+| `docker exec <container> <cmd>` | `musa_docker` | `name=<container>`, `command=<cmd>` |
+| `docker run ... <image> <cmd>` | `musa_docker` | `image=<image>`, `command=<cmd>` |
+| `docker cp`, `docker logs`, other docker commands | `musa_exec` | `command=<full docker command>` |
+| Host commands (`dpkg`, `systemctl`, driver checks) | `musa_exec` | `command=<cmd>` |
+| File transfer local ↔ remote | `musa_sync` | `localPath`, `remotePath`, `direction` |
 | Local-only commands (`git`, file reads, code edits) | Standard tools | Bash, Read, Edit, Write |
 
 **NEVER use Bash tool for Remote MT-GPU Machine commands.**
@@ -252,19 +187,7 @@ The container mounts `~/workspace` → `/workspace` via `-v /home/${GPU_USER}/wo
 
 ### Credentials
 
-**OpenClaw Plugin:** Credentials are set dynamically via `musa_set_mode` tool at runtime.
-
-**MCP Server:** Credentials are loaded from:
-1. Environment variables (`process.env`) — priority
-2. `agent-tools/config/remote-ssh.env` — fallback (gitignored)
-
-Required variables:
-- `GPU_HOST` — Remote MT-GPU Machine hostname or IP
-- `GPU_USER` — SSH username
-- `GPU_SSH_PASSWD` — SSH password
-- `GPU_PORT` — SSH port (default: 22)
-- `GPU_WORK_DIR` — Default remote working directory (default: ~)
-- `TORCH_MUSA_DOCKER_IMAGE` — Default Docker image for `remote-docker` one-shot runs
+Credentials are set dynamically via `musa_set_mode` tool at runtime.
 
 ## Deployment Workflow Priority
 
@@ -312,14 +235,6 @@ openclaw plugins info openclaw-musa
 
 # Reinstall after changes
 openclaw plugins uninstall openclaw-musa && openclaw plugins install -l /path/to/autodeploy
-```
-
-### Remote Configuration Template
-
-Create local runtime config from template (do not commit real credentials):
-
-```bash
-cp agent-tools/config/remote-ssh.env.example agent-tools/config/remote-ssh.env
 ```
 
 ## Code Style Guidelines
@@ -457,7 +372,6 @@ Use `jq` to read/write state fields.
 | 代码 | 文档 |
 |------|------|
 | `skills/index.yml` | [docs/doc-sync/skills.md](docs/doc-sync/skills.md) |
-| `src/dispatcher/**` | [docs/doc-sync/dispatcher.md](docs/doc-sync/dispatcher.md) |
 | `src/core/state-manager.ts` | [docs/doc-sync/state-manager.md](docs/doc-sync/state-manager.md) |
 | `src/shared/trace.ts`, `src/shared/logger.ts` | [docs/doc-sync/tracing.md](docs/doc-sync/tracing.md) |
 
@@ -474,13 +388,12 @@ When debugging issues from Feishu/Dingding messages, use traceId to trace the en
 **Log Locations:**
 | Log | Path | Content |
 |-----|------|---------|
-| Tool execution | `.claude/remote-exec.log` | JSON lines with tool calls |
-| State persistence | `autodeploy/` | hosts.json, operations.json, jobs.json |
+| State persistence | `autodeploy/` | hosts.json, tool-executions.json |
 | Console output | stdout | Structured logs with traceId |
 
 **TraceId Flow:**
 ```
-Feishu message (messageId) → traceId → Dispatcher → Tool calls → State persistence
+Feishu message (messageId) → traceId → Tool calls → State persistence
 ```
 
 **Debugging Steps:**
@@ -488,14 +401,10 @@ Feishu message (messageId) → traceId → Dispatcher → Tool calls → State p
 # 1. Get messageId from Feishu message (visible in message URL or API response)
 
 # 2. Search logs by traceId
-grep "traceId.*<messageId>" .claude/remote-exec.log
 grep "\[TRACE:<messageId>\]" ~/.openclaw/logs/plugin.log
 
 # 3. Check operation state
-cat autodeploy/operations.json | jq '.[] | select(.traceId == "<messageId>")'
-
-# 4. Check job progress
-cat autodeploy/jobs.json | jq '.[] | select(.traceId == "<messageId>")'
+cat autodeploy/tool-executions.json | jq '.[-5:]'
 ```
 
 **Log Format:**

@@ -11,6 +11,6 @@ Help users deploy, validate, debug, and optimize MUSA software stack environment
 ## Behavior Guidelines
 
 - Respond with actionable, step-by-step guidance
-- Prefer platform tools (`musa_dispatch`) over manual commands
+- Prefer platform tools (`musa_*`) over manual commands
 - Clearly state when operations require user confirmation
 - Track progress with traceId for debugging

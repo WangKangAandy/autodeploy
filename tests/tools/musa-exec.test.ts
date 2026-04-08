@@ -2,7 +2,7 @@
  * musa-exec Tools Tests
  *
  * Tests for:
- * - Case 5: musa_get_mode reads from StateManager and sanitizes output
+ * - Case 5: musa_mode reads from StateManager and sanitizes output
  * - Case 6: setDefaultHost validates hostId and doesn't corrupt state on error
  */
 
@@ -97,20 +97,20 @@ describe("musa-exec tools", () => {
   }
 
   // ============================================================================
-  // Case 5: musa_get_mode 脱敏测试
+  // Case 5: musa_mode 脱敏测试
   // ============================================================================
 
-  describe("Case 5: musa_get_mode sanitization", () => {
+  describe("Case 5: musa_mode sanitization", () => {
     it("should return remote mode info WITHOUT password/sudoPasswd", async () => {
       const mockSM = createMockStateManagerWithHost()
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaGetModeTool(mockApi)
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const getModeHandler = toolHandlers.get("musa_get_mode")
-      const result = await getModeHandler!("tool-call-1", {})
+      const modeHandler = toolHandlers.get("musa_mode")
+      // Call without params to get current mode
+      const result = await modeHandler!("tool-call-1", {})
 
       // Verify result structure
       expect(result.details.mode).toBe("remote")
@@ -128,11 +128,10 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaGetModeTool(mockApi)
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const getModeHandler = toolHandlers.get("musa_get_mode")
-      await getModeHandler!("tool-call-1", {})
+      const modeHandler = toolHandlers.get("musa_mode")
+      await modeHandler!("tool-call-1", {})
 
       // Verify it called StateManager methods
       expect(mockSM.getExecutionMode).toHaveBeenCalled()
@@ -148,11 +147,10 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaGetModeTool(mockApi)
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const getModeHandler = toolHandlers.get("musa_get_mode")
-      const result = await getModeHandler!("tool-call-1", {})
+      const modeHandler = toolHandlers.get("musa_mode")
+      const result = await modeHandler!("tool-call-1", {})
 
       expect(result.details.mode).toBe("local")
       expect(result.details.ready).toBe(true)
@@ -174,11 +172,11 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
+      const modeHandler = toolHandlers.get("musa_mode")
 
-      const result = await setModeHandler!("tool-call-1", {
+      const result = await modeHandler!("tool-call-1", {
         mode: "remote",
         host: "10.0.0.99",
         user: "newuser",
@@ -191,20 +189,20 @@ describe("musa-exec tools", () => {
   })
 
   // ============================================================================
-  // Additional: musa_set_mode basic tests
+  // Additional: musa_mode basic tests
   // ============================================================================
 
-  describe("musa_set_mode basic functionality", () => {
+  describe("musa_mode basic functionality", () => {
     it("should set remote mode successfully with valid params", async () => {
       const mockSM = createMockStateManagerWithHost()
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
+      const modeHandler = toolHandlers.get("musa_mode")
 
-      const result = await setModeHandler!("tool-call-1", {
+      const result = await modeHandler!("tool-call-1", {
         mode: "remote",
         host: "10.0.0.1",
         user: "testuser",
@@ -221,11 +219,11 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, null)
+      musaExec.registerMusaModeTool(mockApi, null)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
+      const modeHandler = toolHandlers.get("musa_mode")
 
-      const result = await setModeHandler!("tool-call-1", {
+      const result = await modeHandler!("tool-call-1", {
         mode: "remote",
         // missing host, user, password
       })
@@ -240,11 +238,11 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, mockSM)
+      musaExec.registerMusaModeTool(mockApi, mockSM)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
+      const modeHandler = toolHandlers.get("musa_mode")
 
-      const result = await setModeHandler!("tool-call-1", {
+      const result = await modeHandler!("tool-call-1", {
         mode: "local",
       })
 
@@ -257,11 +255,11 @@ describe("musa-exec tools", () => {
       const mockApi = createMockApi()
 
       const musaExec = await import("../../src/tools/musa-exec")
-      musaExec.registerMusaSetModeTool(mockApi, null)
+      musaExec.registerMusaModeTool(mockApi, null)
 
-      const setModeHandler = toolHandlers.get("musa_set_mode")
+      const modeHandler = toolHandlers.get("musa_mode")
 
-      const result = await setModeHandler!("tool-call-1", {
+      const result = await modeHandler!("tool-call-1", {
         mode: "remote",
         host: "10.0.0.1",
         user: "testuser",
@@ -269,6 +267,22 @@ describe("musa-exec tools", () => {
       })
 
       expect(result.details.error).toContain("StateManager not available")
+    })
+
+    it("should get current mode when called without params", async () => {
+      const mockSM = createMockStateManagerWithHost()
+      const mockApi = createMockApi()
+
+      const musaExec = await import("../../src/tools/musa-exec")
+      musaExec.registerMusaModeTool(mockApi, mockSM)
+
+      const modeHandler = toolHandlers.get("musa_mode")
+
+      // Call without mode parameter (get mode)
+      const result = await modeHandler!("tool-call-1", {})
+
+      expect(result.details.mode).toBe("remote")
+      expect(result.details.connection).toBeDefined()
     })
   })
 })

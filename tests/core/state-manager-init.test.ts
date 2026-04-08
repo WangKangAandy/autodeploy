@@ -54,16 +54,15 @@ describe("StateManager Initialization", () => {
       expect(() => stateManager.assertReady()).not.toThrow()
     })
 
-    it("should include multiple possible causes in the error message", () => {
+    it("should include helpful error message when not ready", () => {
       stateManager = new StateManager(tempDir)
       try {
         stateManager.assertReady()
       } catch (err) {
         expect(err).toBeInstanceOf(Error)
         const message = (err as Error).message
-        expect(message).toContain("Plugin startup race")
-        expect(message).toContain("Initialization failure")
-        expect(message).toContain("File system error")
+        expect(message).toContain("StateManager not ready")
+        expect(message).toContain("plugin.register()")
       }
     })
   })
@@ -100,12 +99,10 @@ describe("StateManager Initialization", () => {
       stateManager = new StateManager(tempDir)
       await stateManager.initialize()
 
+      // Simplified state manager only creates 2 files
       const stateFiles = [
         "hosts.json",
-        "jobs.json",
-        "operations.json",
-        "deployment_state.json",
-        "document_executions.json",
+        "tool-executions.json",
       ]
 
       for (const file of stateFiles) {
@@ -240,7 +237,7 @@ describe("Race condition simulation", () => {
 
     expect(errorThrown).toBe(true)
     expect(errorMessage).toContain("StateManager not ready")
-    expect(errorMessage).toContain("Possible causes")
+    expect(errorMessage).toContain("plugin.register()")
 
     // Cleanup
     fs.rmSync(tempDir, { recursive: true, force: true })
