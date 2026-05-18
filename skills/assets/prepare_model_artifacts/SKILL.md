@@ -1,7 +1,8 @@
 ---
-version: 1
-name: prepare_model_artifacts
-description: Download and verify model files from HuggingFace or ModelScope.
+
+version: 1  
+name: prepare_model_artifacts  
+description: Download and verify model files from ModelScope or HuggingFace.
 
 category: assets
 kind: atomic
@@ -10,13 +11,12 @@ risk_level: idempotent
 execution_mode: remote
 
 owners:
-  - assets-team
 
-triggers:
-  - download model
+- assets-team
+
+## triggers:  
+  - download model  
   - prepare model
-  - 下载模型
----
 
 # Prepare Model Artifacts
 
@@ -24,12 +24,14 @@ Downloads model files, checking local directories first.
 
 ## Inputs
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `MODEL_NAME` | Model identifier (e.g., `Qwen/Qwen2-7B`) | Yes | - |
-| `MODEL_PATH` | Local directory hint | No | - |
-| `MODEL_SOURCE` | `huggingface` or `modelscope` | No | `modelscope` |
-| `HF_TOKEN` | HuggingFace token for gated models | No | - |
+
+| Variable       | Description                              | Required | Default      |
+| -------------- | ---------------------------------------- | -------- | ------------ |
+| `MODEL_NAME`   | Model identifier (e.g., `Qwen/Qwen2-7B`) | Yes      | -            |
+| `MODEL_PATH`   | Local directory hint                     | No       | /data/models |
+| `MODEL_SOURCE` | `modelscope` `or huggingface`            | No       | `modelscope` |
+| `HF_TOKEN`     | HuggingFace token for gated models       | No       | -            |
+
 
 ## Workflow
 
@@ -54,8 +56,11 @@ done
 
 ### Step 2: Download
 
+**Before download:** Check disk on the target volume (`df -h /data`, or parent of `TARGET_DIR`).
+Ensure CLI is on PATH (`command -v huggingface-cli` or `modelscope` per `MODEL_SOURCE`; install `huggingface_hub` / `modelscope` if missing).
+
 ```bash
-TARGET_DIR="${MODEL_PATH:-/data/models/${MODEL_DIR_NAME}}"
+TARGET_DIR="${MODEL_PATH:-/data/models/${MODEL_NAME}}"
 mkdir -p "$TARGET_DIR"
 
 case "$MODEL_SOURCE" in
@@ -80,9 +85,8 @@ esac
 
 - Model directory exists with config file
 - Weight files present (warning only if missing)
+- Download exit code 0; CLI output shows completion with no error or incomplete-transfer messages
 
 ## Troubleshooting
 
-1. **403 Forbidden** - Set `HF_TOKEN` for gated models
-2. **huggingface-cli not found** - `pip install huggingface_hub`
-3. **Disk space** - Check `df -h /data`
+1. **403 Forbidden** — Set `HF_TOKEN` for gated models
