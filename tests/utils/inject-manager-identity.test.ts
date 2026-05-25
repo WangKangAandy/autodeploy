@@ -20,10 +20,6 @@ describe("inject-manager identity wholeFile", () => {
       path.join(__dirname, "../../inject/AGENTS.autodeploy.md"),
       path.join(injectDir, "AGENTS.autodeploy.md")
     )
-    fs.copyFileSync(
-      path.join(__dirname, "../../inject/BOOTSTRAP.autodeploy.md"),
-      path.join(injectDir, "BOOTSTRAP.autodeploy.md")
-    )
   })
 
   afterEach(() => {

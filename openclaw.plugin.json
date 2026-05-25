@@ -2,6 +2,17 @@
   "id": "openclaw-musa",
   "name": "MUSA Deployment",
   "description": "MUSA SDK environment deployment and GPU driver management",
+  "contracts": {
+    "tools": [
+      "musa_mode",
+      "musa_exec",
+      "musa_docker",
+      "musa_sync"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
   "skills": ["./skills"],
   "configSchema": {
     "type": "object",

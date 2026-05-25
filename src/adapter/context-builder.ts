@@ -16,6 +16,10 @@ const CONTEXT_LIMITS = {
   MAX_HOSTS: 3,
 }
 
+/** Prepended every turn — mandatory who-you-are rule; Name/Role only from IDENTITY.md. */
+export const WORKSPACE_IDENTITY_PROMPT =
+  "Who-you-are: use Name/Role from `IDENTITY.md` (Project Context). Do not give a generic OpenClaw AI assistant intro."
+
 /**
  * Build dynamic context string for prompt injection
  */
@@ -23,6 +27,8 @@ export async function buildDynamicContext(stateManager: StateManager): Promise<s
   const snapshot = await stateManager.loadSnapshot()
 
   const lines: string[] = [
+    WORKSPACE_IDENTITY_PROMPT,
+    "",
     "## MUSA Runtime Context",
     "",
     `- **Mode**: ${snapshot.mode}`,

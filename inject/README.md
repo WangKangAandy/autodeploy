@@ -9,6 +9,8 @@ This directory contains source files for static content injection into OpenClaw 
 | AGENTS.autodeploy.md | AGENTS.md | `<!-- AUTODEPLOY:BEGIN/END -->` | Platform rules |
 | IDENTITY.autodeploy.md | IDENTITY.md | whole-file overwrite | Agent identity (replaces OpenClaw scaffold) |
 
+`BOOTSTRAP.md` is **not** injected. On each plugin init, existing `BOOTSTRAP.md` is deleted so OpenClaw treats onboarding as complete (identity is pre-configured).
+
 ## Injection Mechanism
 
 Files are injected by `src/utils/inject-manager.js` during plugin initialization:
@@ -17,7 +19,9 @@ Files are injected by `src/utils/inject-manager.js` during plugin initialization
 2. Check target file exists (create if missing)
 3. Check if block exists in target (by markers)
 4. Block sources: replace marker block or append; identity: overwrite entire file
-5. Atomic write (temp file + rename)
+5. Patch OpenClaw `AGENTS.md` scaffold (remove BOOTSTRAP First Run, add `IDENTITY.md` to Session Startup list)
+6. Delete `BOOTSTRAP.md` if present (musa pre-configured workspaces)
+7. Atomic write (temp file + rename)
 
 ## Adding New Sources
 

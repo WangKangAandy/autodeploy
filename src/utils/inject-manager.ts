@@ -33,6 +33,18 @@ interface InjectResult {
   reason?: string
 }
 
+export interface BootstrapRemovalResult {
+  status: "removed" | "absent" | "failed"
+  reason?: string
+}
+
+export interface AgentsScaffoldPatchResult {
+  status: "updated" | "up_to_date" | "skipped"
+  reason?: string
+}
+
+export const BOOTSTRAP_FILENAME = "BOOTSTRAP.md"
+
 interface BlockStatus {
   status: "up_to_date" | "missing_file" | "missing_block" | "outdated"
 }
@@ -64,13 +76,6 @@ export const INJECT_SOURCES: InjectSource[] = [
     targetFile: "IDENTITY.md",
     // Overwrite entire IDENTITY.md so OpenClaw scaffold placeholders cannot
     // outrank MUSA-Claw in bootstrap / system-prompt context.
-    mode: "wholeFile",
-    required: true,
-  },
-  {
-    key: "bootstrap",
-    sourceFile: "BOOTSTRAP.autodeploy.md",
-    targetFile: "BOOTSTRAP.md",
     mode: "wholeFile",
     required: true,
   },
@@ -300,16 +305,82 @@ function injectSource(workspacePath: string, injectDir: string, source: InjectSo
   }
 }
 
-export function ensureAllInjected(workspacePath: string, injectDir: string): Record<string, InjectResult> {
+/** OpenClaw default AGENTS.md First Run (BOOTSTRAP onboarding). */
+const AGENTS_SCAFFOLD_FIRST_RUN_OLD =
+  /## First Run\r?\n\r?\nIf `BOOTSTRAP\.md` exists, that's your birth certificate\. Follow it, figure out who you are, then delete it\. You won't need it again\./
+
+const AGENTS_SCAFFOLD_FIRST_RUN_NEW = `## First Run
+
+Identity is in \`IDENTITY.md\`. This workspace does not use \`BOOTSTRAP.md\`.`
+
+const AGENTS_SCAFFOLD_STARTUP_LIST_OLD = /- `AGENTS\.md`, `SOUL\.md`, and `USER\.md`/
+const AGENTS_SCAFFOLD_STARTUP_LIST_NEW =
+  "- `IDENTITY.md`, `AGENTS.md`, `SOUL.md`, and `USER.md`"
+
+/**
+ * Patch native OpenClaw AGENTS.md scaffold once: BOOTSTRAP First Run → IDENTITY-based, add IDENTITY to startup list.
+ */
+export function patchAgentsWorkspaceScaffold(workspacePath: string): AgentsScaffoldPatchResult {
+  const agentsPath = path.join(workspacePath, "AGENTS.md")
+  if (!fs.existsSync(agentsPath)) {
+    return { status: "skipped", reason: "AGENTS.md not found" }
+  }
+
+  const original = fs.readFileSync(agentsPath, "utf-8")
+  let content = original
+  const hasBootstrapFirstRun = AGENTS_SCAFFOLD_FIRST_RUN_OLD.test(content)
+  const needsIdentityInList = AGENTS_SCAFFOLD_STARTUP_LIST_OLD.test(content)
+
+  if (!hasBootstrapFirstRun && !needsIdentityInList) {
+    return { status: "up_to_date" }
+  }
+
+  if (hasBootstrapFirstRun) {
+    content = content.replace(AGENTS_SCAFFOLD_FIRST_RUN_OLD, AGENTS_SCAFFOLD_FIRST_RUN_NEW)
+  }
+  if (needsIdentityInList) {
+    content = content.replace(AGENTS_SCAFFOLD_STARTUP_LIST_OLD, AGENTS_SCAFFOLD_STARTUP_LIST_NEW)
+  }
+
+  if (content === original) {
+    return { status: "up_to_date" }
+  }
+
+  atomicWrite(agentsPath, content)
+  return { status: "updated" }
+}
+
+/** Delete BOOTSTRAP.md so OpenClaw skips bootstrap-pending (identity is in IDENTITY.md). */
+export function removeBootstrapFile(workspacePath: string): BootstrapRemovalResult {
+  const targetPath = path.join(workspacePath, BOOTSTRAP_FILENAME)
+  if (!fs.existsSync(targetPath)) {
+    return { status: "absent" }
+  }
+  try {
+    fs.unlinkSync(targetPath)
+    return { status: "removed" }
+  } catch (err: any) {
+    return { status: "failed", reason: err.message }
+  }
+}
+
+export function ensureAllInjected(
+  workspacePath: string,
+  injectDir: string
+): Record<string, InjectResult | BootstrapRemovalResult | AgentsScaffoldPatchResult> {
   if (!fs.existsSync(workspacePath)) {
     fs.mkdirSync(workspacePath, { recursive: true })
   }
 
-  const results: Record<string, InjectResult> = {}
+  const results: Record<string, InjectResult | BootstrapRemovalResult | AgentsScaffoldPatchResult> =
+    {}
 
   for (const source of INJECT_SOURCES) {
     results[source.key] = injectSource(workspacePath, injectDir, source)
   }
+
+  results.agentsScaffold = patchAgentsWorkspaceScaffold(workspacePath)
+  results.bootstrapCleanup = removeBootstrapFile(workspacePath)
 
   return results
 }

@@ -1,8 +1,8 @@
 ## MUSA Platform Rules
 
-### Platform Identity
+### Runtime platform
 
-You are operating within the **openclaw-musa** platform runtime layer. This plugin provides:
+This workspace runs on the **openclaw-musa** plugin runtime (not your self-intro Name — use `IDENTITY.md` Name/Role for that). This plugin provides:
 
 1. **Skill Catalog** — Pre-built automation skills for environment, assets, and workloads
 2. **State Persistence** — Deployment progress saved to `autodeploy/` for recovery

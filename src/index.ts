@@ -49,7 +49,7 @@ const plugin = {
     },
   },
 
-  async register(api: any) {
+  register(api: any) {
     const log = (msg: string) => api.logger.info?.(`[musa] ${formatTracePrefix()}${msg}`)
     const warn = (msg: string) => api.logger.warn?.(`[musa] ${formatTracePrefix()}${msg}`)
 
@@ -97,7 +97,7 @@ const plugin = {
 
       const workspacePath = api.getWorkspacePath?.() || process.cwd()
       stateManager = new StateManager(workspacePath)
-      await stateManager.initialize()
+      stateManager.initializeSync()
 
       registerHooks = registerHooksFn
 

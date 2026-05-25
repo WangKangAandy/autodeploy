@@ -103,6 +103,23 @@ export class StateManager {
     this._ready = true
   }
 
+  /**
+   * Synchronous initialization for runtimes that require sync plugin register().
+   */
+  initializeSync(): void {
+    fs.mkdirSync(this.stateDir, { recursive: true })
+
+    const stateFiles = ["hosts.json", "tool-executions.json"]
+    for (const file of stateFiles) {
+      const filePath = path.join(this.stateDir, file)
+      if (!fs.existsSync(filePath)) {
+        this.atomicWriteSync(file, [])
+      }
+    }
+
+    this._ready = true
+  }
+
   // ==========================================================================
   // Host Management
   // ==========================================================================
@@ -281,6 +298,19 @@ export class StateManager {
     }
 
     await fs.promises.rename(tempPath, filePath)
+  }
+
+  private atomicWriteSync(file: string, data: unknown): void {
+    const filePath = path.join(this.stateDir, file)
+    const tempPath = `${filePath}.tmp`
+
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2))
+
+    if (file === "hosts.json") {
+      fs.chmodSync(tempPath, 0o600)
+    }
+
+    fs.renameSync(tempPath, filePath)
   }
 }
 
