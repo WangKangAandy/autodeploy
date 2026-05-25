@@ -212,7 +212,7 @@ src/ (3637 行)
     hooks.ts            (102) ← before_prompt_build hook
     index.ts              (7) ← 导出
   utils/
-    inject-manager.ts   (380) ← AGENTS.md/IDENTITY.md/BOOTSTRAP.md 注入
+    inject-manager.ts   (380) ← AGENTS.md/IDENTITY.md 注入；patch 原生 AGENTS 脚手架；删除 workspace BOOTSTRAP.md
     agents-merge.ts     (151) ← AGENTS.md 合并
   shared/
     trace.ts            (305) ← tracing

@@ -48,9 +48,9 @@ OpenClaw 的 workspace 是 Agent 的"认知家园"，每次对话都会读取其
 
 ```
 ~/.openclaw/workspace/
-├── AGENTS.md           # 核心规则文件（静态注入点）
-├── BOOTSTRAP.md        # 首次启动引导（一次性）
-├── SOUL.md             # Agent 身份定义
+├── AGENTS.md           # 核心规则文件（静态注入点 + AUTODEPLOY 块）
+├── IDENTITY.md         # 预置身份（openclaw-musa wholeFile 覆盖）
+├── SOUL.md             # Agent 风格与边界
 ├── USER.md             # 用户画像
 ├── TOOLS.md            # 工具使用规范
 ├── HEARTBEAT.md        # 心跳机制说明
