@@ -62,11 +62,9 @@ export const INJECT_SOURCES: InjectSource[] = [
     key: "identity",
     sourceFile: "IDENTITY.autodeploy.md",
     targetFile: "IDENTITY.md",
-    mode: "block",
-    markers: {
-      begin: "<!-- AUTODEPLOY:IDENTITY:BEGIN -->",
-      end: "<!-- AUTODEPLOY:IDENTITY:END -->",
-    },
+    // Overwrite entire IDENTITY.md so OpenClaw scaffold placeholders cannot
+    // outrank MUSA-Claw in bootstrap / system-prompt context.
+    mode: "wholeFile",
     required: true,
   },
   {

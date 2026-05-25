@@ -7,7 +7,7 @@ This directory contains source files for static content injection into OpenClaw 
 | File | Target | Markers | Purpose |
 |------|--------|---------|---------|
 | AGENTS.autodeploy.md | AGENTS.md | `<!-- AUTODEPLOY:BEGIN/END -->` | Platform rules |
-| IDENTITY.autodeploy.md | IDENTITY.md | `<!-- AUTODEPLOY:IDENTITY:BEGIN/END -->` | Agent identity |
+| IDENTITY.autodeploy.md | IDENTITY.md | whole-file overwrite | Agent identity (replaces OpenClaw scaffold) |
 
 ## Injection Mechanism
 
@@ -16,7 +16,7 @@ Files are injected by `src/utils/inject-manager.js` during plugin initialization
 1. Read source content from `inject/` directory
 2. Check target file exists (create if missing)
 3. Check if block exists in target (by markers)
-4. Replace existing block or append new block
+4. Block sources: replace marker block or append; identity: overwrite entire file
 5. Atomic write (temp file + rename)
 
 ## Adding New Sources
